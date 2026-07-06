@@ -6,6 +6,7 @@ using Samklang.Devices;
 using Samklang.Domain;
 using Samklang.Resolver;
 using Samklang.Resolver.Catalog;
+using Samklang.Resolver.PlayCache;
 using Samklang.Sessions;
 using Samklang.SettingsManagement;
 using Samklang.Timing;
@@ -48,7 +49,8 @@ public partial class MainWindow : Window
         var catalogLayer = new CatalogFormatResolverLayer(
             new HttpAppleMusicCatalogClient(_catalogHttpClient),
             new WindowsRegionStorefrontProvider(() => _settingsManager.Current.StorefrontOverride));
-        var resolver = new FormatResolverChain([catalogLayer, new FallbackFormatResolverLayer()]);
+        var playCacheLayer = new PlayCacheFormatResolverLayer();
+        var resolver = new FormatResolverChain([catalogLayer, playCacheLayer, new FallbackFormatResolverLayer()]);
 
         var reverter = new RestingFormatReverter(_settingsManager, _deviceController, new SystemClock());
 
