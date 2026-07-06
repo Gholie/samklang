@@ -98,11 +98,35 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
             return;
         }
 
-        Resolution = _resolver.Resolve(e.Track);
+        ApplyResolution(_resolver.Resolve(e.Track));
+    }
+
+    /// <summary>
+    /// Applies a Format Resolution that arrived after the fact for a Track that has since become
+    /// stale — e.g. the catalog layer's bounded wait (see
+    /// <see cref="Resolver.Catalog.CatalogFormatResolverLayer"/>) timed out and a lower-confidence
+    /// layer's result was already applied, but the catalog lookup kept running in the background
+    /// and eventually produced an Exact result. Silently ignored if <paramref name="track"/> is no
+    /// longer the current Track (the user has since moved on, so applying it now would be wrong).
+    /// Intended to be wired to such a layer's "late resolution" event from the composition root.
+    /// </summary>
+    public void ApplyLateResolution(Track track, FormatResolution resolution)
+    {
+        if (CurrentTrack != track)
+        {
+            return;
+        }
+
+        ApplyResolution(resolution);
+    }
+
+    private void ApplyResolution(FormatResolution resolution)
+    {
+        Resolution = resolution;
         OnPropertyChanged(nameof(Resolution));
 
-        var supportedSampleRates = _deviceController.GetSupportedSampleRates(Resolution.Target.BitDepth);
-        AppliedFormat = RateFamilyClamp.Clamp(Resolution.Target, supportedSampleRates);
+        var supportedSampleRates = _deviceController.GetSupportedSampleRates(resolution.Target.BitDepth);
+        AppliedFormat = RateFamilyClamp.Clamp(resolution.Target, supportedSampleRates);
         OnPropertyChanged(nameof(AppliedFormat));
 
         _deviceController.ApplyTargetFormat(AppliedFormat.Value);

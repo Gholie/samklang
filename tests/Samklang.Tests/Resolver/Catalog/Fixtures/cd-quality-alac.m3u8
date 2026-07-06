@@ -1,0 +1,6 @@
+#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-STREAM-INF:AUDIO-FORMAT="alac",SAMPLE-RATE=44100,BIT-DEPTH=16,CODECS="alac"
+audio-alac-stereo-44100-16.m3u8
+#EXT-X-STREAM-INF:AUDIO-FORMAT="he-aac",CODECS="mp4a.40.2"
+audio-lossy-stereo.m3u8

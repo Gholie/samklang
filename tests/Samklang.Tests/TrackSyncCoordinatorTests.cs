@@ -214,6 +214,60 @@ public class TrackSyncCoordinatorTests
     }
 
     [Fact]
+    public void ApplyLateResolution_applies_and_exposes_the_correction_when_the_track_is_still_current()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(new FormatResolution(new DeviceFormat(44_100, 24), ResolutionConfidence.Fallback, "Tier fallback"));
+        var deviceController = new FakeDeviceController { SupportedSampleRates = new HashSet<int> { 44_100, 96_000 } };
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController, new FakeRestingFormatReverter());
+        var track = new Track("Title", "Artist", "Album");
+        watcher.Fire(track);
+
+        var lateResolution = new FormatResolution(new DeviceFormat(96_000, 24), ResolutionConfidence.Exact, "Catalog match");
+        coordinator.ApplyLateResolution(track, lateResolution);
+
+        Assert.Equal(lateResolution, coordinator.Resolution);
+        Assert.Equal(lateResolution.Target, coordinator.AppliedFormat);
+        Assert.Equal(lateResolution.Target, deviceController.LastAppliedTarget);
+    }
+
+    [Fact]
+    public void ApplyLateResolution_is_ignored_when_the_track_has_since_changed()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(new FormatResolution(new DeviceFormat(44_100, 24), ResolutionConfidence.Fallback, "Tier fallback"));
+        var deviceController = new FakeDeviceController();
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController, new FakeRestingFormatReverter());
+        var staleTrack = new Track("Old Title", "Artist", "Album");
+        watcher.Fire(staleTrack);
+        watcher.Fire(new Track("New Title", "Artist", "Album"));
+        var resolutionBeforeCorrection = coordinator.Resolution;
+        var appliedBeforeCorrection = coordinator.AppliedFormat;
+
+        var lateResolution = new FormatResolution(new DeviceFormat(192_000, 24), ResolutionConfidence.Exact, "Catalog match");
+        coordinator.ApplyLateResolution(staleTrack, lateResolution);
+
+        Assert.Equal(resolutionBeforeCorrection, coordinator.Resolution);
+        Assert.Equal(appliedBeforeCorrection, coordinator.AppliedFormat);
+        Assert.NotEqual(lateResolution.Target, deviceController.LastAppliedTarget);
+    }
+
+    [Fact]
+    public void ApplyLateResolution_is_ignored_when_there_is_no_current_track()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(SampleResolution());
+        var deviceController = new FakeDeviceController();
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController, new FakeRestingFormatReverter());
+
+        var lateResolution = new FormatResolution(new DeviceFormat(192_000, 24), ResolutionConfidence.Exact, "Catalog match");
+        coordinator.ApplyLateResolution(new Track("Title", "Artist", "Album"), lateResolution);
+
+        Assert.Null(coordinator.Resolution);
+        Assert.Null(deviceController.LastAppliedTarget);
+    }
+
+    [Fact]
     public void CheckGracePeriodRevert_ticks_the_reverter_and_refreshes_the_device_format()
     {
         var watcher = new FakeTrackWatcher();

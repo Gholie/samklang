@@ -105,9 +105,46 @@ public class SettingsManagerTests
     }
 
     [Fact]
+    public void UpdateStorefrontOverride_persists_a_trimmed_lowercased_value()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+
+        manager.UpdateStorefrontOverride("  GB ");
+
+        Assert.Equal("GB", manager.Current.StorefrontOverride); // stored as given; lower-casing is WindowsRegionStorefrontProvider's job
+        Assert.Equal(manager.Current, store.Stored);
+    }
+
+    [Fact]
+    public void UpdateStorefrontOverride_with_a_blank_value_clears_the_override()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        manager.UpdateStorefrontOverride("gb");
+
+        manager.UpdateStorefrontOverride("   ");
+
+        Assert.Null(manager.Current.StorefrontOverride);
+    }
+
+    [Fact]
     public void Settings_round_trips_through_System_Text_Json()
     {
         var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30));
+
+        var json = System.Text.Json.JsonSerializer.Serialize(settings);
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<Settings>(json);
+
+        Assert.Equal(settings, roundTripped);
+    }
+
+    [Fact]
+    public void Settings_round_trips_a_storefront_override_through_System_Text_Json()
+    {
+        var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30), "gb");
 
         var json = System.Text.Json.JsonSerializer.Serialize(settings);
         var roundTripped = System.Text.Json.JsonSerializer.Deserialize<Settings>(json);
