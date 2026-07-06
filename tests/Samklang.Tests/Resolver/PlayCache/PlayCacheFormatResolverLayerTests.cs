@@ -182,6 +182,21 @@ public sealed class PlayCacheFormatResolverLayerTests : IDisposable
     }
 
     [Fact]
+    public void TryResolve_matches_a_freshly_written_m4p_file()
+    {
+        // .m4p (FairPlay-protected) is the real extension found on a real Windows install
+        // (issue #20) — .mp3/.m4a alone never matched anything real.
+        var path = CreateCacheFile($"{LibraryId}\\02\\00\\00\\{LibraryId}-000000006C3F3571.m4p");
+        var probe = new StubProbe { [path] = new AudioFileFormat(44_100, null) };
+        var layer = CreateLayer(probe);
+
+        var result = layer.TryResolve(SampleTrack("Some Replayed Song"));
+
+        Assert.NotNull(result);
+        Assert.Equal(44_100, result!.Target.SampleRateHz);
+    }
+
+    [Fact]
     public void TryResolve_prefers_a_file_currently_held_open_by_another_process_even_if_written_long_ago()
     {
         var path = CreateCacheFile($"{LibraryId}\\02\\00\\00\\{LibraryId}-0000000000000457.mp3", ageMinutes: 10);
