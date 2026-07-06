@@ -1,5 +1,6 @@
 using Samklang.Domain;
 using Windows.Media.Control;
+using AppPlaybackState = Samklang.Domain.PlaybackState;
 
 namespace Samklang.Sessions;
 
@@ -23,6 +24,10 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IDisposable
     public Track? CurrentTrack { get; private set; }
 
     public event EventHandler<TrackChangedEventArgs>? TrackChanged;
+
+    public AppPlaybackState? PlaybackState { get; private set; }
+
+    public event EventHandler<PlaybackStateChangedEventArgs>? PlaybackStateChanged;
 
     public async Task StartAsync()
     {
@@ -60,6 +65,7 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IDisposable
         {
             DetachSession();
             SetCurrentTrack(null);
+            SetPlaybackState(null);
             return;
         }
 
@@ -71,7 +77,9 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IDisposable
         DetachSession();
         _attachedSession = appleMusicSession;
         _attachedSession.MediaPropertiesChanged += OnMediaPropertiesChanged;
+        _attachedSession.PlaybackInfoChanged += OnPlaybackInfoChanged;
         await RefreshTrackAsync(_attachedSession);
+        RefreshPlaybackState(_attachedSession);
     }
 
     private void DetachSession()
@@ -79,6 +87,7 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IDisposable
         if (_attachedSession is not null)
         {
             _attachedSession.MediaPropertiesChanged -= OnMediaPropertiesChanged;
+            _attachedSession.PlaybackInfoChanged -= OnPlaybackInfoChanged;
         }
 
         _attachedSession = null;
@@ -107,6 +116,33 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IDisposable
         }
     }
 
+    private void OnPlaybackInfoChanged(
+        GlobalSystemMediaTransportControlsSession sender,
+        PlaybackInfoChangedEventArgs args) =>
+        RefreshPlaybackState(sender);
+
+    private void RefreshPlaybackState(GlobalSystemMediaTransportControlsSession session)
+    {
+        try
+        {
+            var status = session.GetPlaybackInfo()?.PlaybackStatus;
+            SetPlaybackState(status switch
+            {
+                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing => AppPlaybackState.Playing,
+                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused => AppPlaybackState.Paused,
+                // Stopped/Closed/Opened/Changing are all treated as idle ("not actively
+                // playing"); Grace Period revert only cares about Playing vs. everything else.
+                _ => AppPlaybackState.Stopped,
+            });
+        }
+        catch
+        {
+            // Mirrors RefreshTrackAsync's handling: a session that disappears mid-read reads as
+            // idle rather than propagating a transient COM failure.
+            SetPlaybackState(AppPlaybackState.Stopped);
+        }
+    }
+
     private void SetCurrentTrack(Track? track)
     {
         // Track is a record, so this is a structural comparison: Apple Music re-firing
@@ -119,5 +155,16 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IDisposable
 
         CurrentTrack = track;
         TrackChanged?.Invoke(this, new TrackChangedEventArgs(track));
+    }
+
+    private void SetPlaybackState(AppPlaybackState? state)
+    {
+        if (PlaybackState == state)
+        {
+            return;
+        }
+
+        PlaybackState = state;
+        PlaybackStateChanged?.Invoke(this, new PlaybackStateChangedEventArgs(state));
     }
 }
