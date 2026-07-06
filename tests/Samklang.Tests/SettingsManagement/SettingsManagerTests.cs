@@ -176,6 +176,42 @@ public class SettingsManagerTests
     }
 
     [Fact]
+    public void UpdateTierSampleRates_persists_the_change_and_leaves_other_fields_untouched()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        var originalRestingFormat = manager.Current.RestingFormat;
+        var newMapping = new TierSampleRateMapping(44_100, 48_000, 88_200, 176_400);
+
+        manager.UpdateTierSampleRates(newMapping);
+
+        Assert.Equal(newMapping, manager.Current.TierSampleRates);
+        Assert.Equal(originalRestingFormat, manager.Current.RestingFormat);
+        Assert.Equal(manager.Current, store.Stored);
+    }
+
+    [Fact]
+    public void LoadOrSeed_with_no_persisted_settings_seeds_the_default_tier_sample_rates()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+
+        var settings = manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+
+        Assert.Equal(TierSampleRateMapping.Default, settings.TierSampleRates);
+    }
+
+    [Fact]
+    public void EffectiveTierSampleRates_falls_back_to_the_default_when_null()
+    {
+        var settings = new Settings(new DeviceFormat(44_100, 24), TimeSpan.FromSeconds(30), DeviceTargetingMode.FollowDefault, PinnedDeviceId: null);
+
+        Assert.Null(settings.TierSampleRates);
+        Assert.Equal(TierSampleRateMapping.Default, settings.EffectiveTierSampleRates);
+    }
+
+    [Fact]
     public void Settings_round_trips_through_System_Text_Json()
     {
         var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30), DeviceTargetingMode.Pinned, "device-2");
@@ -195,5 +231,33 @@ public class SettingsManagerTests
         var roundTripped = System.Text.Json.JsonSerializer.Deserialize<Settings>(json);
 
         Assert.Equal(settings, roundTripped);
+    }
+
+    [Fact]
+    public void Settings_round_trips_tier_sample_rates_through_System_Text_Json()
+    {
+        var settings = new Settings(
+            new DeviceFormat(88_200, 24),
+            TimeSpan.FromSeconds(30),
+            DeviceTargetingMode.FollowDefault,
+            PinnedDeviceId: null,
+            TierSampleRates: new TierSampleRateMapping(44_100, 48_000, 88_200, 176_400));
+
+        var json = System.Text.Json.JsonSerializer.Serialize(settings);
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<Settings>(json);
+
+        Assert.Equal(settings, roundTripped);
+    }
+
+    [Fact]
+    public void Settings_without_tier_sample_rates_round_trips_to_null_through_System_Text_Json()
+    {
+        var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30), DeviceTargetingMode.FollowDefault, PinnedDeviceId: null);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(settings);
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<Settings>(json);
+
+        Assert.Null(roundTripped!.TierSampleRates);
+        Assert.Equal(TierSampleRateMapping.Default, roundTripped.EffectiveTierSampleRates);
     }
 }
