@@ -11,9 +11,12 @@ public static class AppleMusicSessionFilter
     /// Prefix of Apple Music for Windows' package family name. The AUMID Windows 11 reports
     /// for the app's session is this prefix plus a per-install publisher hash and app id
     /// suffix (e.g. "AppleInc.AppleMusicWin_nzyj5cx40ttqa!App"), so we match on the prefix
-    /// rather than a single hard-coded full AUMID.
+    /// rather than a single hard-coded full AUMID. Internal (not private) because
+    /// <see cref="Resolver.PlayCache.PlayCachePaths"/> matches the same prefix against package
+    /// *folder* names under <c>%LOCALAPPDATA%\Packages</c>, which carry the identical per-install
+    /// hash suffix.
     /// </summary>
-    private const string PackageFamilyNamePrefix = "AppleInc.AppleMusicWin";
+    internal const string PackageFamilyNamePrefix = "AppleInc.AppleMusicWin";
 
     /// <summary>
     /// Some Windows versions report the session under the bare executable name instead of the
