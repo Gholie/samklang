@@ -15,6 +15,17 @@ public interface ITrackWatcher
     /// <summary>Raised whenever <see cref="CurrentTrack"/> changes, including transitions to/from null.</summary>
     event EventHandler<TrackChangedEventArgs>? TrackChanged;
 
+    /// <summary>
+    /// The Apple Music session's current Playback State, or null if no session is attached
+    /// (Apple Music isn't running). Used to detect idle playback (paused/stopped) for the
+    /// Grace Period revert — <see cref="CurrentTrack"/> alone only reports track identity, not
+    /// whether it's actually playing.
+    /// </summary>
+    PlaybackState? PlaybackState { get; }
+
+    /// <summary>Raised whenever <see cref="PlaybackState"/> changes, including transitions to/from null.</summary>
+    event EventHandler<PlaybackStateChangedEventArgs>? PlaybackStateChanged;
+
     /// <summary>Begins watching for media sessions. Safe to await before the first Track arrives.</summary>
     Task StartAsync();
 }
@@ -22,4 +33,9 @@ public interface ITrackWatcher
 public sealed class TrackChangedEventArgs(Track? track) : EventArgs
 {
     public Track? Track { get; } = track;
+}
+
+public sealed class PlaybackStateChangedEventArgs(PlaybackState? state) : EventArgs
+{
+    public PlaybackState? State { get; } = state;
 }

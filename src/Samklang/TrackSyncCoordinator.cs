@@ -7,16 +7,18 @@ using Samklang.Sessions;
 namespace Samklang;
 
 /// <summary>
-/// Wires the tracer-bullet pipeline together: on every Track change reported by the
 /// <see cref="ITrackWatcher"/>, runs the <see cref="IFormatResolver"/>, clamps its Target Format
 /// to a rate the default render device actually supports (<see cref="RateFamilyClamp"/>, using
 /// capabilities probed via <see cref="IDeviceController.GetSupportedSampleRates"/>), and applies
-/// the clamped result via the <see cref="IDeviceController"/>. Exposes the current Track, Format
-/// Resolution, clamped Applied Format, and live Device Format as notifying properties so a UI
-/// (MainWindow) can bind or subscribe — including showing requested vs. applied when clamping
-/// changed the rate — without knowing anything about SMTC, the resolver chain, or COM.
+/// the clamped result via the <see cref="IDeviceController"/>. Also feeds the watcher's
+/// Track/Playback State signals to an <see cref="IRestingFormatReverter"/>, which reverts the
+/// device to the Resting Format after the Grace Period once playback is idle (paused, stopped, or
+/// Apple Music closed). Exposes the current Track, Format Resolution, clamped Applied Format, and
+/// live Device Format as notifying properties so a UI (MainWindow) can bind or subscribe —
+/// including showing requested vs. applied when clamping changed the rate — without knowing
+/// anything about SMTC, the resolver chain, or COM.
 ///
-/// Framework-free by design, so this whole pipeline is unit-testable with fakes for all three
+/// Framework-free by design, so this whole pipeline is unit-testable with fakes for all
 /// collaborators, independent of WPF.
 /// </summary>
 public sealed class TrackSyncCoordinator : INotifyPropertyChanged
@@ -24,13 +26,20 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
     private readonly ITrackWatcher _trackWatcher;
     private readonly IFormatResolver _resolver;
     private readonly IDeviceController _deviceController;
+    private readonly IRestingFormatReverter _reverter;
 
-    public TrackSyncCoordinator(ITrackWatcher trackWatcher, IFormatResolver resolver, IDeviceController deviceController)
+    public TrackSyncCoordinator(
+        ITrackWatcher trackWatcher,
+        IFormatResolver resolver,
+        IDeviceController deviceController,
+        IRestingFormatReverter reverter)
     {
         _trackWatcher = trackWatcher;
         _resolver = resolver;
         _deviceController = deviceController;
+        _reverter = reverter;
         _trackWatcher.TrackChanged += OnTrackChanged;
+        _trackWatcher.PlaybackStateChanged += OnPlaybackStateChanged;
     }
 
     /// <summary>The Track currently playing in Apple Music, or null when it isn't.</summary>
@@ -60,6 +69,17 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
         OnPropertyChanged(nameof(DeviceFormat));
     }
 
+    /// <summary>
+    /// Checks whether the Grace Period has elapsed since playback went idle and, if so, reverts
+    /// the device to the Resting Format. Intended to be called periodically (e.g. from a UI poll
+    /// timer) since idle duration otherwise has no event to hang off of.
+    /// </summary>
+    public void CheckGracePeriodRevert()
+    {
+        _reverter.Tick();
+        RefreshDeviceFormat();
+    }
+
     private void OnTrackChanged(object? sender, TrackChangedEventArgs e)
     {
         CurrentTrack = e.Track;
@@ -71,6 +91,10 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
             OnPropertyChanged(nameof(Resolution));
             AppliedFormat = null;
             OnPropertyChanged(nameof(AppliedFormat));
+
+            // No track at all means Apple Music closed (or hasn't been picked up yet), one of
+            // the three idle conditions alongside paused/stopped.
+            _reverter.NotifyIdle();
             return;
         }
 
@@ -83,6 +107,20 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
 
         _deviceController.ApplyTargetFormat(AppliedFormat.Value);
         RefreshDeviceFormat();
+    }
+
+    private void OnPlaybackStateChanged(object? sender, PlaybackStateChangedEventArgs e)
+    {
+        if (e.State == PlaybackState.Playing)
+        {
+            _reverter.NotifyActive();
+        }
+        else
+        {
+            // Paused, Stopped, or null (session gone) are all idle per CONTEXT.md's Grace Period
+            // definition.
+            _reverter.NotifyIdle();
+        }
     }
 
     private void OnPropertyChanged(string propertyName) =>
