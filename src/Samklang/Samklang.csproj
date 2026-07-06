@@ -13,6 +13,24 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Samklang</RootNamespace>
     <AssemblyName>Samklang</AssemblyName>
+    <!-- Single source of truth for the app version (issue #10): shown in the tray/UI via
+         VersionInfo, embedded in the built assembly, and what the release workflow's
+         `dotnet publish -p:Version=...` overrides at release time to match the pushed tag so the
+         running app's displayed version always matches the Velopack package it came from. -->
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <!-- Velopack (issue #10) requires a hand-written Main so it can run its startup hooks before
+       WPF's own bootstrapping — see the SDK's own guidance reflected in App.xaml.cs's Main
+       method. Moving App.xaml from ApplicationDefinition to Page keeps its XAML-compiled
+       InitializeComponent() but stops the SDK from also generating its own competing Main(). -->
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <StartupObject>Samklang.App</StartupObject>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,6 +43,12 @@
          ID is "WPF-UI" (hyphenated) — a same-named-but-different "Wpf.Ui" (dotted) package also
          exists on nuget.org and is NOT this project (unrelated author); don't confuse the two. -->
     <PackageReference Include="WPF-UI" Version="4.3.0" />
+    <!-- Packaging + auto-update (issue #10). VelopackApp.Build().Run() in App.xaml.cs's Main
+         handles first-run/update/uninstall hooks; AppUpdateService (Updates/) wraps
+         UpdateManager + GithubSource for the in-app "check GitHub Releases and self-update" flow.
+         Version 1.2.0 is current as of the M4 release work (per docs.velopack.io) — keep the `vpk`
+         CLI tool used in .github/workflows/release.yml at the same version. -->
+    <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
 
 </Project>
