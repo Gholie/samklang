@@ -10,7 +10,7 @@ namespace Samklang.Resolver.PlayCache;
 /// first folder under <c>Packages</c> whose name starts with that prefix rather than hard-coding
 /// one install's hash.
 /// </summary>
-public sealed class PlayCachePaths
+public sealed class PlayCachePaths : IPlayCacheLocator
 {
     private readonly Func<string> _packagesRootAccessor;
 
@@ -35,6 +35,8 @@ public sealed class PlayCachePaths
 
     /// <summary>Path to the PlayCache directory's item-metadata plist (access-date/cloud-id per cached item).</summary>
     public string? PlayCacheInfoPath => PlayCacheDirectory is { } directory ? Path.Combine(directory, "PlayCacheInfo.xml") : null;
+
+    public string? GetPlayCacheDirectory() => PlayCacheDirectory;
 
     private string? TryFindPackageRoot()
     {

@@ -47,25 +47,20 @@ public sealed class PlayCacheFormatResolverLayer : IFormatResolverLayer
     /// <summary>A PlayCacheInfo.xml entry is only trusted when its access-date is no older than this window before the call.</summary>
     public static readonly TimeSpan AccessDateSlack = TimeSpan.FromMinutes(2);
 
-    private readonly Func<string?> _playCacheDirectoryAccessor;
+    private readonly IPlayCacheLocator _locator;
     private readonly IAudioFileFormatProbe _probe;
     private readonly Func<DateTimeOffset> _now;
 
-    public PlayCacheFormatResolverLayer(PlayCachePaths? paths = null, IAudioFileFormatProbe? probe = null)
-        : this(() => (paths ?? new PlayCachePaths()).PlayCacheDirectory, probe ?? new PlayCacheAudioFormatProbe(), now: null)
-    {
-    }
-
-    /// <param name="playCacheDirectoryAccessor">Reads the current PlayCache directory path (or null if unresolvable). Re-invoked on every call so tests can point it at a fixture directory.</param>
-    /// <param name="probe">Reads sample rate/bit depth from a candidate file's container header.</param>
+    /// <param name="locator">Resolves the current PlayCache directory path (or null if unresolvable); re-queried on every call so tests can point it at a fixture directory. Defaults to the real <see cref="PlayCachePaths"/>.</param>
+    /// <param name="probe">Reads sample rate/bit depth from a candidate file's container header. Defaults to <see cref="PlayCacheAudioFormatProbe"/>.</param>
     /// <param name="now">Clock used for freshness comparisons; defaults to the real UTC clock.</param>
-    internal PlayCacheFormatResolverLayer(
-        Func<string?> playCacheDirectoryAccessor,
-        IAudioFileFormatProbe probe,
+    public PlayCacheFormatResolverLayer(
+        IPlayCacheLocator? locator = null,
+        IAudioFileFormatProbe? probe = null,
         Func<DateTimeOffset>? now = null)
     {
-        _playCacheDirectoryAccessor = playCacheDirectoryAccessor;
-        _probe = probe;
+        _locator = locator ?? new PlayCachePaths();
+        _probe = probe ?? new PlayCacheAudioFormatProbe();
         _now = now ?? (() => DateTimeOffset.UtcNow);
     }
 
@@ -80,7 +75,7 @@ public sealed class PlayCacheFormatResolverLayer : IFormatResolverLayer
 
         try
         {
-            var directory = _playCacheDirectoryAccessor();
+            var directory = _locator.GetPlayCacheDirectory();
             if (directory is null || !Directory.Exists(directory))
             {
                 return null;
