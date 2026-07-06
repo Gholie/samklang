@@ -205,7 +205,10 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
         }
 
         var format = EnhancedHlsManifestParser.ParseBestLosslessFormat(manifest);
-        return format is null ? null : new FormatResolution(format.Value, ResolutionConfidence.Exact, Name);
+
+        // ParseBestLosslessFormat only ever matches ALAC variants (see its AUDIO-FORMAT filter),
+        // so a result here is always genuinely lossless — IsLossless: true, not left null.
+        return format is null ? null : new FormatResolution(format.Value, ResolutionConfidence.Exact, Name, IsLossless: true);
     }
 }
 

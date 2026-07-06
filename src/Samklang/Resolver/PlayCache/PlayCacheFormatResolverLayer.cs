@@ -102,7 +102,14 @@ public sealed class PlayCacheFormatResolverLayer : IFormatResolverLayer
         new(
             new DeviceFormat(format.SampleRateHz, format.BitDepth ?? FallbackFormatResolverLayer.PinnedBitDepth),
             ResolutionConfidence.Exact,
-            Name);
+            Name,
+            // AudioFileFormat.BitDepth is only non-null when the probe actually parsed ALAC's
+            // magic-cookie config box — AAC/MP3 (lossy) never expose one. That's the one place
+            // this layer genuinely knows whether the source is lossless; the pinned bit depth
+            // fallback above is a device-switching default, not evidence of losslessness, so it
+            // must not be conflated with this flag (see FormatResolution.IsLossless's doc comment
+            // for why the two are different things).
+            IsLossless: format.BitDepth.HasValue);
 
     private AudioFileFormat? MatchDownloadTemp(string directory, Track track)
     {

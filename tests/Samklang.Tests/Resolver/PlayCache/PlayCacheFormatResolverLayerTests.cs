@@ -121,6 +121,10 @@ public sealed class PlayCacheFormatResolverLayerTests : IDisposable
         Assert.Equal(ResolutionConfidence.Exact, result.Confidence);
         Assert.Equal("PlayCache", result.SourceLayer);
         Assert.Equal(layer.Name, result.SourceLayer);
+        // The probe found a real (non-null) bit depth here — an ALAC container — so this is
+        // genuinely lossless, not just "we know the exact rate" (see the lossy case below, where
+        // Confidence is Exact too but IsLossless must be false).
+        Assert.True(result.IsLossless);
     }
 
     [Fact]
@@ -250,6 +254,29 @@ public sealed class PlayCacheFormatResolverLayerTests : IDisposable
 
         Assert.NotNull(result);
         Assert.Equal(FallbackFormatResolverLayer.PinnedBitDepth, result!.Target.BitDepth);
+    }
+
+    /// <summary>
+    /// Regression test: a null <see cref="AudioFileFormat.BitDepth"/> (lossy AAC/MP3 — the probe
+    /// found no PCM bit depth to report) must produce <see cref="FormatResolution.IsLossless"/>
+    /// false, even though the resolution is still Confidence.Exact (the rate itself is known for
+    /// certain) and even though the pinned-bit-depth fallback above makes the *Target* format
+    /// indistinguishable from a genuine ALAC file at the same rate. A consumer (e.g. the status
+    /// dashboard's Audio Tier badge) must be able to tell this apart from real losslessness using
+    /// IsLossless, not Confidence or the Target's bit depth.
+    /// </summary>
+    [Fact]
+    public void TryResolve_reports_IsLossless_false_when_the_probe_found_no_real_bit_depth()
+    {
+        var path = CreateCacheFile($"{LibraryId}\\Downloads\\My Song.tmp\\download.m4a");
+        var probe = new StubProbe { [path] = new AudioFileFormat(44_100, null) }; // e.g. lossy AAC
+        var layer = CreateLayer(probe);
+
+        var result = layer.TryResolve(SampleTrack("My Song"));
+
+        Assert.NotNull(result);
+        Assert.Equal(ResolutionConfidence.Exact, result!.Confidence);
+        Assert.False(result.IsLossless);
     }
 
     [Fact]

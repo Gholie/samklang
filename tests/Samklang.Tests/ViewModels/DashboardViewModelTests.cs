@@ -173,19 +173,44 @@ public class DashboardViewModelTests
         Assert.Contains("USB DAC", viewModel.DeviceTargetWarningMessage);
     }
 
-    [Theory]
-    [InlineData(ResolutionConfidence.Fallback, 44_100, "Unknown")]
-    [InlineData(ResolutionConfidence.Exact, 44_100, "Lossless")]
-    [InlineData(ResolutionConfidence.Exact, 96_000, "Hi-Res Lossless")]
-    [InlineData(ResolutionConfidence.TierDerived, 192_000, "Hi-Res Lossless")]
-    public void Audio_tier_badge_is_derived_from_confidence_and_sample_rate(ResolutionConfidence confidence, int sampleRateHz, string expectedBadge)
+    [Fact]
+    public void Audio_tier_badge_is_unknown_for_a_fallback_resolution()
     {
-        var resolution = new FormatResolution(new DeviceFormat(sampleRateHz, 24), confidence, "Some layer");
+        var resolution = new FormatResolution(new DeviceFormat(44_100, 24), ResolutionConfidence.Fallback, "Tier fallback");
         var (viewModel, watcher, _, _) = CreateSut(resolution);
 
         watcher.Fire(new Track("Title", "Artist", "Album"));
 
-        Assert.Equal(expectedBadge, viewModel.AudioTierDisplay);
+        Assert.Equal("Unknown", viewModel.AudioTierDisplay);
+    }
+
+    [Fact]
+    public void Audio_tier_badge_shows_lossless_for_a_resolution_a_layer_confirmed_is_lossless()
+    {
+        var resolution = new FormatResolution(new DeviceFormat(96_000, 24), ResolutionConfidence.Exact, "Catalog match", IsLossless: true);
+        var (viewModel, watcher, _, _) = CreateSut(resolution);
+
+        watcher.Fire(new Track("Title", "Artist", "Album"));
+
+        Assert.Equal("Hi-Res Lossless", viewModel.AudioTierDisplay);
+    }
+
+    /// <summary>
+    /// Regression test: PlayCacheFormatResolverLayer reports ResolutionConfidence.Exact for a
+    /// plain lossy AAC/MP3 file just as confidently as for genuine ALAC — the dashboard must not
+    /// badge that "Lossless" just because the confidence is Exact and the rate happens to sit in
+    /// the Lossless range.
+    /// </summary>
+    [Fact]
+    public void Audio_tier_badge_does_not_show_lossless_for_a_PlayCache_sourced_resolution_known_to_be_lossy()
+    {
+        var resolution = new FormatResolution(new DeviceFormat(44_100, 24), ResolutionConfidence.Exact, "PlayCache", IsLossless: false);
+        var (viewModel, watcher, _, _) = CreateSut(resolution);
+
+        watcher.Fire(new Track("Title", "Artist", "Album"));
+
+        Assert.Equal("Lossy Stereo", viewModel.AudioTierDisplay);
+        Assert.NotEqual("Lossless", viewModel.AudioTierDisplay);
     }
 
     [Fact]
