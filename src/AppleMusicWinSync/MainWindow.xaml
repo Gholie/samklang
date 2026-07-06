@@ -1,0 +1,12 @@
+<Window x:Class="AppleMusicWinSync.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Apple Music Win Sync"
+        Width="520" Height="360"
+        WindowStartupLocation="CenterScreen">
+    <Grid>
+        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
+                   FontSize="14" Opacity="0.6"
+                   Text="M0 scaffold — status dashboard arrives in M1." />
+    </Grid>
+</Window>
