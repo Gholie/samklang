@@ -1,8 +1,21 @@
 <Application x:Class="Samklang.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
              StartupUri="MainWindow.xaml"
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- WPF-UI's Fluent theme + control styles (issue #9). Theme="Light" here is just
+                     the initial resource load; Wpf.Ui.Appearance.SystemThemeWatcher.Watch (called
+                     from MainWindow) is what actually keeps it following the live Windows
+                     light/dark setting. ControlsDictionary restyles standard WPF control types
+                     directly (Button, TextBox, CheckBox, ...), not just ui:-prefixed controls, so
+                     MainWindow's XAML can mostly use plain controls and still get Fluent styling. -->
+                <ui:ThemesDictionary Theme="Light" />
+                <ui:ControlsDictionary />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>
