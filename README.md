@@ -4,11 +4,30 @@
 
 **Bit-perfect Apple Music playback on Windows.** *Samklang* (Norwegian: consonance — literally "together-sound") is a Windows 11 tray utility that switches your audio device's format (sample rate + bit depth) to match the track currently playing in **Apple Music for Windows** — so lossless and hi-res tracks play without resampling.
 
-> **Status: pre-alpha.** Repository scaffold and domain model; no releasable build yet. See [docs/PLAN.md](docs/PLAN.md) for the roadmap.
+> **Status: public release.** v0.1.0 is the first tagged release — see [docs/PLAN.md](docs/PLAN.md) for the roadmap and [releases](https://github.com/Gholie/samklang/releases) for downloads.
 
 ## Why
 
 Windows resamples every app's audio to the device's shared-mode format (the "Default Format" in the Sound control panel). If that's set to 48 kHz and Apple Music plays a 96 kHz hi-res track, you're not hearing hi-res — you're hearing a resample. This tool watches what's playing and retunes the device so track and device agree.
+
+## Install
+
+1. Grab the latest installer from the [Releases page](https://github.com/Gholie/samklang/releases) — download `Samklang-Setup.exe` from the newest release's Assets.
+2. Run it. There's no install wizard to click through — it installs to your user profile (no admin prompt) and launches Samklang automatically when it's done.
+3. Windows SmartScreen may warn that this is from an "unknown publisher" the first time, since the installer isn't code-signed yet — click **More info → Run anyway** to proceed.
+
+### First run
+
+- Samklang starts minimized to the **system tray** (the icon area near the clock) — there's no window that pops up on first launch. Look for its icon there; hover over it to see a tooltip with the current version, track, and applied format.
+- Left-click (or double-click) the tray icon to open the dashboard window, which shows the current track, its resolved format, confidence, and recent switch history, plus a Settings tab for device targeting, tier mappings, resting format, grace period, and "Start with Windows."
+- Nothing needs configuring to get going: open Apple Music, play something, and Samklang picks up the track change and switches your default audio device's format automatically. Use Settings only if you want to pin a specific device, tweak tier→sample-rate mappings, or change the resting format/grace period.
+
+### What to expect
+
+- **Tray icon, always running.** Closing the dashboard window (the X button) just hides it back to the tray — Samklang keeps watching in the background. Use the tray menu's **Exit** to actually quit.
+- **A brief silence on format changes.** Switching a device's format live causes a short mute/rebuild hiccup — this is inherent to how Windows shared-mode audio works, not a bug.
+- **Automatic updates.** Samklang checks GitHub Releases for a newer version on every startup (and via the tray menu's **Check for Updates**) and applies it automatically in the background — you don't need to manually redownload installers for future releases.
+- **Settings live in `%APPDATA%`** as JSON (device targeting, tier mappings, resting format, grace period) — delete that file to reset to defaults.
 
 ## How it works
 
@@ -29,9 +48,11 @@ The project's vocabulary is defined in [CONTEXT.md](CONTEXT.md); load-bearing de
 
 - Windows 11 (Windows 10 build 19041+ likely works, untested)
 - [Apple Music for Windows](https://apps.microsoft.com/detail/9PFHDD62MXS1) with an Apple Music subscription
-- To build: .NET 8 SDK
+- To build from source: .NET 8 SDK
 
-## Building
+## Building from source
+
+Only needed if you're developing Samklang, not for normal use — see [Install](#install) above if you just want to run it.
 
 ```powershell
 dotnet build
