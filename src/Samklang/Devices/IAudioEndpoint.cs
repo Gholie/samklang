@@ -20,4 +20,12 @@ public interface IAudioEndpoint
 
     /// <summary>Mutes or unmutes the device's master volume.</summary>
     void SetMuted(bool muted);
+
+    /// <summary>
+    /// The sample rates (Hz) the device actually accepts in shared mode at
+    /// <paramref name="bitDepth"/>, probed against the device's mix pipeline rather than assumed.
+    /// Implementations are expected to cache this per device, since probing every candidate rate
+    /// is comparatively expensive and a device's capabilities don't change between Track changes.
+    /// </summary>
+    IReadOnlySet<int> GetSupportedSampleRates(int bitDepth);
 }

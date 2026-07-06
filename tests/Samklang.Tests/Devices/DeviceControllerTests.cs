@@ -24,6 +24,8 @@ public class DeviceControllerTests
         }
 
         public void SetMuted(bool muted) => Calls.Add(muted ? "mute" : "unmute");
+
+        public IReadOnlySet<int> GetSupportedSampleRates(int bitDepth) => new HashSet<int>();
     }
 
     private sealed class ThrowingFakeAudioEndpoint : IAudioEndpoint
@@ -40,6 +42,8 @@ public class DeviceControllerTests
         }
 
         public void SetMuted(bool muted) => Calls.Add(muted ? "mute" : "unmute");
+
+        public IReadOnlySet<int> GetSupportedSampleRates(int bitDepth) => new HashSet<int>();
     }
 
     [Fact]
@@ -86,5 +90,38 @@ public class DeviceControllerTests
         var controller = new DeviceController(endpoint);
 
         Assert.Equal(endpoint.Current, controller.GetCurrentFormat());
+    }
+
+    [Fact]
+    public void GetSupportedSampleRates_delegates_to_the_endpoint()
+    {
+        var endpoint = new RecordingAudioEndpoint(new HashSet<int> { 44_100, 88_200 });
+        var controller = new DeviceController(endpoint);
+
+        var result = controller.GetSupportedSampleRates(24);
+
+        Assert.Equal(new HashSet<int> { 44_100, 88_200 }, result);
+        Assert.Equal(24, endpoint.LastRequestedBitDepth);
+    }
+
+    private sealed class RecordingAudioEndpoint(IReadOnlySet<int> supportedSampleRates) : IAudioEndpoint
+    {
+        public int? LastRequestedBitDepth { get; private set; }
+
+        public DeviceFormat? GetCurrentFormat() => null;
+
+        public void SetFormat(DeviceFormat format)
+        {
+        }
+
+        public void SetMuted(bool muted)
+        {
+        }
+
+        public IReadOnlySet<int> GetSupportedSampleRates(int bitDepth)
+        {
+            LastRequestedBitDepth = bitDepth;
+            return supportedSampleRates;
+        }
     }
 }
