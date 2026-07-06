@@ -64,6 +64,21 @@ public partial class MainWindow : Window
         TargetFormatText.Text = resolution?.Target.ToString() ?? "—";
         ConfidenceText.Text = resolution?.Confidence.ToString() ?? "—";
 
+        // The coordinator clamps the requested Target Format to a rate the device actually
+        // supports (Samklang.Domain.RateFamilyClamp) before applying it; when that changed the
+        // rate, show both so the user isn't left wondering why playback isn't at the rate the
+        // track list implies.
+        var applied = _coordinator.AppliedFormat;
+        if (resolution is not null && applied is not null && applied.Value != resolution.Target)
+        {
+            ClampedFormatRow.Visibility = Visibility.Visible;
+            ClampedFormatText.Text = $"{applied} (device doesn't support {resolution.Target})";
+        }
+        else
+        {
+            ClampedFormatRow.Visibility = Visibility.Collapsed;
+        }
+
         DeviceFormatText.Text = _coordinator.DeviceFormat?.ToString() ?? "—";
     }
 }
