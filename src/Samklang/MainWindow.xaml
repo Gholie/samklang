@@ -12,6 +12,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -25,12 +26,17 @@
             <TextBlock x:Name="TargetFormatText" Text="—" />
         </StackPanel>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,12">
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,12" x:Name="ClampedFormatRow" Visibility="Collapsed">
+            <TextBlock Text="Clamped to: " FontWeight="Bold" />
+            <TextBlock x:Name="ClampedFormatText" Text="—" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,12">
             <TextBlock Text="Confidence: " FontWeight="Bold" />
             <TextBlock x:Name="ConfidenceText" Text="—" />
         </StackPanel>
 
-        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,12">
+        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,0,0,12">
             <TextBlock Text="Device format: " FontWeight="Bold" />
             <TextBlock x:Name="DeviceFormatText" Text="—" />
         </StackPanel>

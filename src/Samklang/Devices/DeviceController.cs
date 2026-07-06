@@ -35,4 +35,6 @@ public sealed class DeviceController(IAudioEndpoint endpoint) : IDeviceControlle
 
         return true;
     }
+
+    public IReadOnlySet<int> GetSupportedSampleRates(int bitDepth) => endpoint.GetSupportedSampleRates(bitDepth);
 }
