@@ -1,5 +1,7 @@
 # Samklang
 
+[![CI](https://github.com/Gholie/samklang/actions/workflows/ci.yml/badge.svg)](https://github.com/Gholie/samklang/actions/workflows/ci.yml)
+
 **Bit-perfect Apple Music playback on Windows.** *Samklang* (Norwegian: consonance — literally "together-sound") is a Windows 11 tray utility that switches your audio device's format (sample rate + bit depth) to match the track currently playing in **Apple Music for Windows** — so lossless and hi-res tracks play without resampling.
 
 > **Status: pre-alpha.** Repository scaffold and domain model; no releasable build yet. See [docs/PLAN.md](docs/PLAN.md) for the roadmap.
