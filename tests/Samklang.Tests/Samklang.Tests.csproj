@@ -12,6 +12,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Enhanced-HLS manifest fixtures for EnhancedHlsManifestParserTests — copied so the parser
+         can be tested against real-shaped manifest text with no live network call. -->
+    <None Include="Resolver\Catalog\Fixtures\*.m3u8" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">

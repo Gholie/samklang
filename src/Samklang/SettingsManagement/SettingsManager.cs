@@ -60,6 +60,18 @@ public sealed class SettingsManager(ISettingsStore store) : INotifyPropertyChang
         OnPropertyChanged(nameof(Current));
     }
 
+    /// <summary>
+    /// Updates and persists the catalog storefront override (e.g. "gb"), or clears it (null/blank)
+    /// to fall back to auto-detecting the storefront from the Windows region. See
+    /// <see cref="Resolver.Catalog.WindowsRegionStorefrontProvider"/>.
+    /// </summary>
+    public void UpdateStorefrontOverride(string? storefrontOverride)
+    {
+        Current = Current with { StorefrontOverride = string.IsNullOrWhiteSpace(storefrontOverride) ? null : storefrontOverride.Trim() };
+        store.Save(Current);
+        OnPropertyChanged(nameof(Current));
+    }
+
     private void OnPropertyChanged(string propertyName) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

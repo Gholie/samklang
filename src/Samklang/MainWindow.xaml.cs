@@ -1,8 +1,10 @@
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Threading;
 using Samklang.Devices;
 using Samklang.Domain;
 using Samklang.Resolver;
+using Samklang.Resolver.Catalog;
 using Samklang.Sessions;
 using Samklang.SettingsManagement;
 using Samklang.Timing;
@@ -15,21 +17,28 @@ public partial class MainWindow : Window
     private readonly SettingsManager _settingsManager;
     private readonly TrackSyncCoordinator _coordinator;
     private readonly DispatcherTimer _pollTimer;
+    private readonly HttpClient _catalogHttpClient;
 
     public MainWindow()
     {
         InitializeComponent();
 
         _trackWatcher = new SmtcTrackWatcher();
-        var resolver = new FormatResolverChain([new FallbackFormatResolverLayer()]);
         var deviceController = new DeviceController(new PolicyConfigAudioEndpoint());
 
         _settingsManager = new SettingsManager(new JsonFileSettingsStore());
         _settingsManager.LoadOrSeed(TryGetCurrentDeviceFormat(deviceController));
 
+        _catalogHttpClient = new HttpClient();
+        var catalogLayer = new CatalogFormatResolverLayer(
+            new HttpAppleMusicCatalogClient(_catalogHttpClient),
+            new WindowsRegionStorefrontProvider(() => _settingsManager.Current.StorefrontOverride));
+        var resolver = new FormatResolverChain([catalogLayer, new FallbackFormatResolverLayer()]);
+
         var reverter = new RestingFormatReverter(_settingsManager, deviceController, new SystemClock());
 
         _coordinator = new TrackSyncCoordinator(_trackWatcher, resolver, deviceController, reverter);
+        catalogLayer.LateResolutionAvailable += (_, args) => Dispatcher.BeginInvoke(() => _coordinator.ApplyLateResolution(args.Track, args.Resolution));
         _coordinator.PropertyChanged += (_, _) => Dispatcher.BeginInvoke(UpdateDisplay);
 
         // Drives both the "live device format" reading (the device can change from outside our
@@ -77,6 +86,7 @@ public partial class MainWindow : Window
     {
         _pollTimer.Stop();
         _trackWatcher.Dispose();
+        _catalogHttpClient.Dispose();
     }
 
     private void UpdateDisplay()
