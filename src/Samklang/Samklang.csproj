@@ -19,6 +19,12 @@
     <!-- Core Audio (MMDevice/AudioEndpointVolume) + WaveFormat marshaling for the device
          controller's IPolicyConfig interop. Per docs/PLAN.md's M1 NuGet list. -->
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- Fluent styling (issue #9's status dashboard) — FluentWindow, ControlsDictionary's
+         restyling of standard WPF controls, and SystemThemeWatcher for Windows light/dark theme
+         following. Per docs/PLAN.md's settled "WPF + WPF-UI (Fluent)" GUI decision. NuGet package
+         ID is "WPF-UI" (hyphenated) — a same-named-but-different "Wpf.Ui" (dotted) package also
+         exists on nuget.org and is NOT this project (unrelated author); don't confuse the two. -->
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
 
 </Project>
