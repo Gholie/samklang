@@ -3,10 +3,36 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Samklang"
         Width="520" Height="360"
-        WindowStartupLocation="CenterScreen">
-    <Grid>
-        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
-                   FontSize="14" Opacity="0.6"
-                   Text="M0 scaffold — status dashboard arrives in M1." />
+        WindowStartupLocation="CenterScreen"
+        Loaded="Window_Loaded"
+        Closed="Window_Closed">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
+            <TextBlock Text="Track: " FontWeight="Bold" />
+            <TextBlock x:Name="TrackText" Text="(none — waiting for Apple Music)" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,12">
+            <TextBlock Text="Target format: " FontWeight="Bold" />
+            <TextBlock x:Name="TargetFormatText" Text="—" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,12">
+            <TextBlock Text="Confidence: " FontWeight="Bold" />
+            <TextBlock x:Name="ConfidenceText" Text="—" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,12">
+            <TextBlock Text="Device format: " FontWeight="Bold" />
+            <TextBlock x:Name="DeviceFormatText" Text="—" />
+        </StackPanel>
     </Grid>
 </Window>

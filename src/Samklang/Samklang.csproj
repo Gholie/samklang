@@ -11,4 +11,10 @@
     <AssemblyName>Samklang</AssemblyName>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Core Audio (MMDevice/AudioEndpointVolume) + WaveFormat marshaling for the device
+         controller's IPolicyConfig interop. Per docs/PLAN.md's M1 NuGet list. -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
 </Project>
