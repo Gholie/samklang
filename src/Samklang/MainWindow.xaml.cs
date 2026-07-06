@@ -14,6 +14,7 @@ namespace Samklang;
 public partial class MainWindow : Window
 {
     private readonly SmtcTrackWatcher _trackWatcher;
+    private readonly IDeviceController _deviceController;
     private readonly SettingsManager _settingsManager;
     private readonly TrackSyncCoordinator _coordinator;
     private readonly DispatcherTimer _pollTimer;
@@ -24,10 +25,11 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         _trackWatcher = new SmtcTrackWatcher();
-        var deviceController = new DeviceController(new PolicyConfigAudioEndpoint());
+        _deviceController = new DeviceController(new PolicyConfigAudioEndpoint());
 
         _settingsManager = new SettingsManager(new JsonFileSettingsStore());
-        _settingsManager.LoadOrSeed(TryGetCurrentDeviceFormat(deviceController));
+        _settingsManager.LoadOrSeed(TryGetCurrentDeviceFormat(_deviceController));
+        _deviceController.SetTargeting(_settingsManager.Current.DeviceTargetingMode, _settingsManager.Current.PinnedDeviceId);
 
         _catalogHttpClient = new HttpClient();
         var catalogLayer = new CatalogFormatResolverLayer(
@@ -35,16 +37,18 @@ public partial class MainWindow : Window
             new WindowsRegionStorefrontProvider(() => _settingsManager.Current.StorefrontOverride));
         var resolver = new FormatResolverChain([catalogLayer, new FallbackFormatResolverLayer()]);
 
-        var reverter = new RestingFormatReverter(_settingsManager, deviceController, new SystemClock());
+        var reverter = new RestingFormatReverter(_settingsManager, _deviceController, new SystemClock());
 
-        _coordinator = new TrackSyncCoordinator(_trackWatcher, resolver, deviceController, reverter);
+        _coordinator = new TrackSyncCoordinator(_trackWatcher, resolver, _deviceController, reverter);
         catalogLayer.LateResolutionAvailable += (_, args) => Dispatcher.BeginInvoke(() => _coordinator.ApplyLateResolution(args.Track, args.Resolution));
         _coordinator.PropertyChanged += (_, _) => Dispatcher.BeginInvoke(UpdateDisplay);
 
         // Drives both the "live device format" reading (the device can change from outside our
         // own switches, e.g. the user changing it by hand in the Sound control panel) and the
         // Grace Period revert check — neither has its own event to hang off of, so both are
-        // polled on the same cheap timer.
+        // polled on the same cheap timer. This is also what makes Follow mode pick up a
+        // Windows-default change, and Pinned mode notice a pinned device disappearing or
+        // reappearing, within one poll interval (see TrackSyncCoordinator.RefreshDeviceFormat).
         _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _pollTimer.Tick += (_, _) => _coordinator.CheckGracePeriodRevert();
     }
@@ -116,6 +120,26 @@ public partial class MainWindow : Window
         }
 
         DeviceFormatText.Text = _coordinator.DeviceFormat?.ToString() ?? "—";
+
+        var targetStatus = _coordinator.TargetStatus;
+        if (targetStatus is null)
+        {
+            DeviceTargetStatusText.Text = string.Empty;
+            DeviceTargetStatusText.Visibility = Visibility.Collapsed;
+        }
+        else if (targetStatus.IsFallback)
+        {
+            // Per this issue's acceptance criteria: a pinned device that's gone missing must
+            // fall back gracefully but stay visible to the user, not fail silently.
+            DeviceTargetStatusText.Text =
+                $"Pinned device unavailable — using Windows default ({targetStatus.FriendlyName ?? "unknown"}) instead.";
+            DeviceTargetStatusText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            DeviceTargetStatusText.Text = string.Empty;
+            DeviceTargetStatusText.Visibility = Visibility.Collapsed;
+        }
     }
 
     private void LoadSettingsIntoForm()
@@ -124,8 +148,33 @@ public partial class MainWindow : Window
         RestingSampleRateBox.Text = settings.RestingFormat.SampleRateHz.ToString();
         RestingBitDepthBox.Text = settings.RestingFormat.BitDepth.ToString();
         GracePeriodSecondsBox.Text = settings.GracePeriod.TotalSeconds.ToString("0");
+
+        FollowDefaultRadio.IsChecked = settings.DeviceTargetingMode == DeviceTargetingMode.FollowDefault;
+        PinDeviceRadio.IsChecked = settings.DeviceTargetingMode == DeviceTargetingMode.Pinned;
+
+        RefreshDevicePickerItems();
+        if (settings.PinnedDeviceId is not null)
+        {
+            DevicePickerBox.SelectedValue = settings.PinnedDeviceId;
+        }
+
         SettingsStatusText.Text = string.Empty;
     }
+
+    /// <summary>Repopulates the device picker from the render devices Windows currently reports as active.</summary>
+    private void RefreshDevicePickerItems()
+    {
+        var previouslySelected = DevicePickerBox.SelectedValue as string;
+        DevicePickerBox.ItemsSource = _deviceController.GetActiveRenderDevices();
+        DevicePickerBox.DisplayMemberPath = nameof(RenderDevice.FriendlyName);
+        DevicePickerBox.SelectedValuePath = nameof(RenderDevice.Id);
+        if (previouslySelected is not null)
+        {
+            DevicePickerBox.SelectedValue = previouslySelected;
+        }
+    }
+
+    private void RefreshDevicesButton_Click(object sender, RoutedEventArgs e) => RefreshDevicePickerItems();
 
     private void SaveSettingsButton_Click(object sender, RoutedEventArgs e)
     {
@@ -137,8 +186,18 @@ public partial class MainWindow : Window
             return;
         }
 
+        var targetingMode = PinDeviceRadio.IsChecked == true ? DeviceTargetingMode.Pinned : DeviceTargetingMode.FollowDefault;
+        var pinnedDeviceId = DevicePickerBox.SelectedValue as string;
+        if (targetingMode == DeviceTargetingMode.Pinned && pinnedDeviceId is null)
+        {
+            SettingsStatusText.Text = "Pick a device to pin — not saved.";
+            return;
+        }
+
         _settingsManager.UpdateRestingFormat(new DeviceFormat(sampleRateHz, bitDepth));
         _settingsManager.UpdateGracePeriod(TimeSpan.FromSeconds(gracePeriodSeconds));
+        _settingsManager.UpdateDeviceTargeting(targetingMode, pinnedDeviceId);
+        _deviceController.SetTargeting(targetingMode, pinnedDeviceId);
         SettingsStatusText.Text = "Saved.";
     }
 }

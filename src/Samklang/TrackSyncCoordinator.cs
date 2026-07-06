@@ -55,18 +55,33 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
     /// </summary>
     public DeviceFormat? AppliedFormat { get; private set; }
 
-    /// <summary>The default render device's actual, live Device Format.</summary>
+    /// <summary>The effective render device's actual, live Device Format.</summary>
     public DeviceFormat? DeviceFormat { get; private set; }
+
+    /// <summary>
+    /// The device-targeting status as of the last refresh: which device is actually in effect,
+    /// its friendly name, and whether that's a fallback away from a missing Pinned device. Null
+    /// until the first refresh.
+    /// </summary>
+    public DeviceTargetStatus? TargetStatus { get; private set; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public Task StartAsync() => _trackWatcher.StartAsync();
 
-    /// <summary>Re-reads the device's actual Device Format, for callers that poll independently of track changes.</summary>
+    /// <summary>
+    /// Re-reads the effective device's actual Device Format and targeting status, for callers
+    /// that poll independently of track changes — this is what makes Follow mode pick up a
+    /// Windows-default change, and Pinned mode notice a pinned device disappearing or
+    /// reappearing, within one poll interval.
+    /// </summary>
     public void RefreshDeviceFormat()
     {
         DeviceFormat = _deviceController.GetCurrentFormat();
         OnPropertyChanged(nameof(DeviceFormat));
+
+        TargetStatus = _deviceController.GetTargetStatus();
+        OnPropertyChanged(nameof(TargetStatus));
     }
 
     /// <summary>

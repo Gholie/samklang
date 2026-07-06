@@ -5,19 +5,22 @@ using Samklang.Domain;
 namespace Samklang.Devices;
 
 /// <summary>
-/// The concrete, COM-backed <see cref="IAudioEndpoint"/>: talks to the current default render
-/// device via <c>IPolicyConfig</c> (shared-mode Device Format) and NAudio's
+/// The concrete, COM-backed <see cref="IAudioEndpoint"/>: talks to a render device (addressed by
+/// device ID) via <c>IPolicyConfig</c> (shared-mode Device Format) and NAudio's
 /// <c>AudioEndpointVolume</c> (mute), both standard — if undocumented — Core Audio interop also
-/// used by tools like WindowsLosslessSwitcher.
+/// used by tools like WindowsLosslessSwitcher. Also enumerates active render devices and reads
+/// the Windows default's ID via NAudio's <c>MMDeviceEnumerator</c>, the two facts device targeting
+/// (<see cref="Domain.DeviceTargetResolver"/>) needs.
 ///
-/// Also probes which sample rates the device supports in shared mode, via WASAPI's
+/// Also probes which sample rates a device supports in shared mode, via WASAPI's
 /// <c>IAudioClient.IsFormatSupported</c> — the standard capability check, distinct from
 /// <c>IPolicyConfig</c>, which only reads/writes the format already in effect. Rate-family
 /// clamping itself (deciding which supported rate to apply) is a pure policy kept out of this
 /// class entirely; see <see cref="Samklang.Domain.RateFamilyClamp"/>.
 ///
 /// Not unit-testable in isolation — <see cref="DeviceController"/> carries the testable
-/// switch-or-skip decision and is exercised against a fake of <see cref="IAudioEndpoint"/> instead.
+/// switch-or-skip and device-targeting decisions and is exercised against a fake of
+/// <see cref="IAudioEndpoint"/> instead.
 /// </summary>
 public sealed class PolicyConfigAudioEndpoint : IAudioEndpoint
 {
@@ -29,11 +32,11 @@ public sealed class PolicyConfigAudioEndpoint : IAudioEndpoint
     // on both keeps the cache correct if that ever changes.
     private readonly Dictionary<string, IReadOnlySet<int>> _supportedSampleRateCache = new();
 
-    public DeviceFormat? GetCurrentFormat()
+    public DeviceFormat? GetCurrentFormat(string deviceId)
     {
         try
         {
-            using var device = GetDefaultRenderDevice();
+            using var device = GetDevice(deviceId);
             var format = PolicyConfigInterop.GetDeviceFormat(device.ID);
             return format is null ? null : new DeviceFormat(format.SampleRate, format.BitsPerSample);
         }
@@ -43,23 +46,23 @@ public sealed class PolicyConfigAudioEndpoint : IAudioEndpoint
         }
     }
 
-    public void SetFormat(DeviceFormat format)
+    public void SetFormat(string deviceId, DeviceFormat format)
     {
-        using var device = GetDefaultRenderDevice();
+        using var device = GetDevice(deviceId);
         var channels = TryGetChannelCount(device) ?? 2;
         var waveFormat = new WaveFormat(format.SampleRateHz, format.BitDepth, channels);
         PolicyConfigInterop.SetDeviceFormat(device.ID, waveFormat);
     }
 
-    public void SetMuted(bool muted)
+    public void SetMuted(string deviceId, bool muted)
     {
-        using var device = GetDefaultRenderDevice();
+        using var device = GetDevice(deviceId);
         device.AudioEndpointVolume.Mute = muted;
     }
 
-    public IReadOnlySet<int> GetSupportedSampleRates(int bitDepth)
+    public IReadOnlySet<int> GetSupportedSampleRates(string deviceId, int bitDepth)
     {
-        using var device = GetDefaultRenderDevice();
+        using var device = GetDevice(deviceId);
         var cacheKey = $"{device.ID}|{bitDepth}";
         if (_supportedSampleRateCache.TryGetValue(cacheKey, out var cached))
         {
@@ -69,6 +72,44 @@ public sealed class PolicyConfigAudioEndpoint : IAudioEndpoint
         var supported = ProbeSupportedSampleRates(device, bitDepth);
         _supportedSampleRateCache[cacheKey] = supported;
         return supported;
+    }
+
+    public IReadOnlyList<RenderDevice> GetActiveRenderDevices()
+    {
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            var collection = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+
+            var devices = new List<RenderDevice>(collection.Count);
+            foreach (var device in collection)
+            {
+                devices.Add(new RenderDevice(device.ID, device.FriendlyName));
+                device.Dispose();
+            }
+
+            return devices;
+        }
+        catch
+        {
+            // Enumeration can fail very early at startup, or if the audio service is
+            // unavailable; an empty list is a safe "nothing known" answer rather than crashing.
+            return [];
+        }
+    }
+
+    public string? GetDefaultRenderDeviceId()
+    {
+        try
+        {
+            using var device = GetDefaultRenderDevice();
+            return device.ID;
+        }
+        catch
+        {
+            // No default render device exists (e.g. all devices disabled/unplugged).
+            return null;
+        }
     }
 
     private static IReadOnlySet<int> ProbeSupportedSampleRates(MMDevice device, int bitDepth)
@@ -94,6 +135,12 @@ public sealed class PolicyConfigAudioEndpoint : IAudioEndpoint
         }
 
         return supported;
+    }
+
+    private static MMDevice GetDevice(string deviceId)
+    {
+        using var enumerator = new MMDeviceEnumerator();
+        return enumerator.GetDevice(deviceId);
     }
 
     private static MMDevice GetDefaultRenderDevice()
