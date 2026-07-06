@@ -38,6 +38,16 @@ public class RestingFormatReverterTests
         // Not exercised by these tests: RestingFormatReverter reverts straight to the persisted
         // Resting Format without going through rate-family clamping.
         public IReadOnlySet<int> GetSupportedSampleRates(int bitDepth) => new HashSet<int>();
+
+        // Not exercised by these tests: RestingFormatReverter doesn't concern itself with device
+        // targeting, only with applying the Resting Format to whatever device is already effective.
+        public void SetTargeting(DeviceTargetingMode mode, string? pinnedDeviceId)
+        {
+        }
+
+        public IReadOnlyList<RenderDevice> GetActiveRenderDevices() => [];
+
+        public DeviceTargetStatus GetTargetStatus() => new(null, null, false);
     }
 
     private static readonly DeviceFormat RestingFormat = new(44_100, 24);
@@ -47,7 +57,8 @@ public class RestingFormatReverterTests
     {
         var clock = new FakeClock();
         var deviceController = new FakeDeviceController();
-        var settingsManager = new SettingsManager(new FakeSettingsStore(new Settings(RestingFormat, GracePeriod)));
+        var settingsManager = new SettingsManager(new FakeSettingsStore(
+            new Settings(RestingFormat, GracePeriod, DeviceTargetingMode.FollowDefault, PinnedDeviceId: null)));
         settingsManager.LoadOrSeed(null);
 
         var reverter = new RestingFormatReverter(settingsManager, deviceController, clock);

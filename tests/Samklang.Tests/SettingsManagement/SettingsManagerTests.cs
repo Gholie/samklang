@@ -31,6 +31,8 @@ public class SettingsManagerTests
 
         Assert.Equal(deviceFormat, settings.RestingFormat);
         Assert.Equal(Settings.DefaultGracePeriod, settings.GracePeriod);
+        Assert.Equal(Settings.DefaultDeviceTargetingMode, settings.DeviceTargetingMode);
+        Assert.Null(settings.PinnedDeviceId);
         Assert.Equal(settings, manager.Current);
     }
 
@@ -64,7 +66,7 @@ public class SettingsManagerTests
     [Fact]
     public void LoadOrSeed_with_persisted_settings_loads_them_instead_of_reseeding()
     {
-        var persisted = new Settings(new DeviceFormat(192_000, 24), TimeSpan.FromSeconds(45));
+        var persisted = new Settings(new DeviceFormat(192_000, 24), TimeSpan.FromSeconds(45), DeviceTargetingMode.Pinned, "device-2");
         var store = new FakeSettingsStore { Stored = persisted };
         var manager = new SettingsManager(store);
 
@@ -131,9 +133,52 @@ public class SettingsManagerTests
     }
 
     [Fact]
+    public void UpdateDeviceTargeting_to_pinned_persists_the_mode_and_the_pinned_device_id()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+
+        manager.UpdateDeviceTargeting(DeviceTargetingMode.Pinned, "device-2");
+
+        Assert.Equal(DeviceTargetingMode.Pinned, manager.Current.DeviceTargetingMode);
+        Assert.Equal("device-2", manager.Current.PinnedDeviceId);
+        Assert.Equal(manager.Current, store.Stored);
+    }
+
+    [Fact]
+    public void UpdateDeviceTargeting_to_follow_default_clears_a_previously_pinned_device_id()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        manager.UpdateDeviceTargeting(DeviceTargetingMode.Pinned, "device-2");
+
+        manager.UpdateDeviceTargeting(DeviceTargetingMode.FollowDefault, pinnedDeviceId: null);
+
+        Assert.Equal(DeviceTargetingMode.FollowDefault, manager.Current.DeviceTargetingMode);
+        Assert.Null(manager.Current.PinnedDeviceId);
+    }
+
+    [Fact]
+    public void UpdateDeviceTargeting_leaves_resting_format_and_grace_period_untouched()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        var originalRestingFormat = manager.Current.RestingFormat;
+        var originalGracePeriod = manager.Current.GracePeriod;
+
+        manager.UpdateDeviceTargeting(DeviceTargetingMode.Pinned, "device-2");
+
+        Assert.Equal(originalRestingFormat, manager.Current.RestingFormat);
+        Assert.Equal(originalGracePeriod, manager.Current.GracePeriod);
+    }
+
+    [Fact]
     public void Settings_round_trips_through_System_Text_Json()
     {
-        var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30));
+        var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30), DeviceTargetingMode.Pinned, "device-2");
 
         var json = System.Text.Json.JsonSerializer.Serialize(settings);
         var roundTripped = System.Text.Json.JsonSerializer.Deserialize<Settings>(json);
@@ -144,7 +189,7 @@ public class SettingsManagerTests
     [Fact]
     public void Settings_round_trips_a_storefront_override_through_System_Text_Json()
     {
-        var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30), "gb");
+        var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30), DeviceTargetingMode.FollowDefault, PinnedDeviceId: null, StorefrontOverride: "gb");
 
         var json = System.Text.Json.JsonSerializer.Serialize(settings);
         var roundTripped = System.Text.Json.JsonSerializer.Deserialize<Settings>(json);

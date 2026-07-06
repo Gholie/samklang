@@ -46,6 +46,9 @@ public class TrackSyncCoordinatorTests
     {
         public DeviceFormat? Current { get; set; }
         public DeviceFormat? LastAppliedTarget { get; private set; }
+        public DeviceTargetStatus TargetStatusToReturn { get; set; } = new(null, null, false);
+        public DeviceTargetingMode? LastTargetingMode { get; private set; }
+        public string? LastPinnedDeviceId { get; private set; }
 
         // Empty by default: RateFamilyClamp treats an empty supported set as "nothing known" and
         // passes the requested rate through unchanged, so existing tests that don't care about
@@ -62,6 +65,16 @@ public class TrackSyncCoordinatorTests
         }
 
         public IReadOnlySet<int> GetSupportedSampleRates(int bitDepth) => SupportedSampleRates;
+
+        public void SetTargeting(DeviceTargetingMode mode, string? pinnedDeviceId)
+        {
+            LastTargetingMode = mode;
+            LastPinnedDeviceId = pinnedDeviceId;
+        }
+
+        public IReadOnlyList<RenderDevice> GetActiveRenderDevices() => [];
+
+        public DeviceTargetStatus GetTargetStatus() => TargetStatusToReturn;
     }
 
     private sealed class FakeRestingFormatReverter : IRestingFormatReverter
@@ -169,6 +182,27 @@ public class TrackSyncCoordinatorTests
         coordinator.RefreshDeviceFormat();
 
         Assert.Equal(new DeviceFormat(96_000, 24), coordinator.DeviceFormat);
+    }
+
+    [Fact]
+    public void RefreshDeviceFormat_also_refreshes_the_device_target_status()
+    {
+        var watcher = new FakeTrackWatcher();
+        var deviceController = new FakeDeviceController
+        {
+            TargetStatusToReturn = new DeviceTargetStatus("device-1", "Default Device", IsFallback: true),
+        };
+        var coordinator = new TrackSyncCoordinator(
+            watcher,
+            new FakeResolver(SampleResolution()),
+            deviceController,
+            new FakeRestingFormatReverter());
+
+        coordinator.RefreshDeviceFormat();
+
+        Assert.NotNull(coordinator.TargetStatus);
+        Assert.Equal("device-1", coordinator.TargetStatus!.DeviceId);
+        Assert.True(coordinator.TargetStatus!.IsFallback);
     }
 
     [Fact]

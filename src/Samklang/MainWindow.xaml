@@ -16,6 +16,9 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -39,26 +42,44 @@
             <TextBlock x:Name="ConfidenceText" Text="—" />
         </StackPanel>
 
-        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,0,0,24">
+        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,0,0,8">
             <TextBlock Text="Device format: " FontWeight="Bold" />
             <TextBlock x:Name="DeviceFormatText" Text="—" />
         </StackPanel>
 
-        <TextBlock Grid.Row="5" Text="Settings" FontWeight="Bold" Margin="0,0,0,8" />
+        <TextBlock Grid.Row="5" x:Name="DeviceTargetStatusText" Foreground="DarkOrange" TextWrapping="Wrap"
+                   Margin="0,0,0,24" Visibility="Collapsed" />
 
-        <StackPanel Grid.Row="6" Orientation="Horizontal" Margin="0,0,0,8">
+        <TextBlock Grid.Row="6" Text="Settings" FontWeight="Bold" Margin="0,0,0,8" />
+
+        <StackPanel Grid.Row="7" Orientation="Horizontal" Margin="0,0,0,8">
             <TextBlock Text="Resting Format — sample rate (Hz):" Width="220" VerticalAlignment="Center" />
             <TextBox x:Name="RestingSampleRateBox" Width="90" />
             <TextBlock Text="bit depth:" VerticalAlignment="Center" Margin="16,0,8,0" />
             <TextBox x:Name="RestingBitDepthBox" Width="50" />
         </StackPanel>
 
-        <StackPanel Grid.Row="7" Orientation="Horizontal" Margin="0,0,0,8">
+        <StackPanel Grid.Row="8" Orientation="Horizontal" Margin="0,0,0,8">
             <TextBlock Text="Grace Period (seconds):" Width="220" VerticalAlignment="Center" />
             <TextBox x:Name="GracePeriodSecondsBox" Width="90" />
         </StackPanel>
 
-        <StackPanel Grid.Row="8" Orientation="Horizontal" Margin="0,0,0,12">
+        <StackPanel Grid.Row="9" Margin="0,0,0,8">
+            <TextBlock Text="Device targeting:" Margin="0,0,0,4" />
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                <RadioButton x:Name="FollowDefaultRadio" GroupName="DeviceTargeting" Content="Follow Windows default"
+                             VerticalAlignment="Center" Margin="0,0,16,0" />
+                <RadioButton x:Name="PinDeviceRadio" GroupName="DeviceTargeting" Content="Pin a specific device"
+                             VerticalAlignment="Center" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal">
+                <ComboBox x:Name="DevicePickerBox" Width="280" />
+                <Button x:Name="RefreshDevicesButton" Content="Refresh" Padding="8,2" Margin="8,0,0,0"
+                        Click="RefreshDevicesButton_Click" />
+            </StackPanel>
+        </StackPanel>
+
+        <StackPanel Grid.Row="10" Orientation="Horizontal" Margin="0,0,0,12">
             <Button x:Name="SaveSettingsButton" Content="Save settings" Padding="12,4" Click="SaveSettingsButton_Click" />
             <TextBlock x:Name="SettingsStatusText" Margin="12,0,0,0" VerticalAlignment="Center" />
         </StackPanel>
