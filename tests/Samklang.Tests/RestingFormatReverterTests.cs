@@ -34,6 +34,10 @@ public class RestingFormatReverterTests
             Current = target;
             return true;
         }
+
+        // Not exercised by these tests: RestingFormatReverter reverts straight to the persisted
+        // Resting Format without going through rate-family clamping.
+        public IReadOnlySet<int> GetSupportedSampleRates(int bitDepth) => new HashSet<int>();
     }
 
     private static readonly DeviceFormat RestingFormat = new(44_100, 24);

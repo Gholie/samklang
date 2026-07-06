@@ -102,7 +102,7 @@ public class TrackSyncCoordinatorTests
         var resolution = new FormatResolution(new DeviceFormat(96_000, 24), ResolutionConfidence.Exact, "Catalog match");
         var resolver = new FakeResolver(resolution);
         var deviceController = new FakeDeviceController { SupportedSampleRates = new HashSet<int> { 44_100, 96_000 } };
-        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController);
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController, new FakeRestingFormatReverter());
 
         watcher.Fire(new Track("Title", "Artist", "Album"));
 
@@ -117,7 +117,7 @@ public class TrackSyncCoordinatorTests
         var resolution = new FormatResolution(new DeviceFormat(192_000, 24), ResolutionConfidence.Exact, "Catalog match");
         var resolver = new FakeResolver(resolution);
         var deviceController = new FakeDeviceController { SupportedSampleRates = new HashSet<int> { 44_100, 48_000 } };
-        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController);
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController, new FakeRestingFormatReverter());
 
         watcher.Fire(new Track("Title", "Artist", "Album"));
 
@@ -132,7 +132,7 @@ public class TrackSyncCoordinatorTests
     {
         var watcher = new FakeTrackWatcher();
         var resolver = new FakeResolver(new FormatResolution(new DeviceFormat(44_100, 24), ResolutionConfidence.Fallback, "Tier fallback"));
-        var coordinator = new TrackSyncCoordinator(watcher, resolver, new FakeDeviceController());
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, new FakeDeviceController(), new FakeRestingFormatReverter());
 
         watcher.Fire(new Track("Title", "Artist", "Album"));
         watcher.Fire(null);
