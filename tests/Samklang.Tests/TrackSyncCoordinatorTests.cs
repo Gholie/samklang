@@ -37,6 +37,11 @@ public class TrackSyncCoordinatorTests
         public DeviceFormat? Current { get; set; }
         public DeviceFormat? LastAppliedTarget { get; private set; }
 
+        // Empty by default: RateFamilyClamp treats an empty supported set as "nothing known" and
+        // passes the requested rate through unchanged, so existing tests that don't care about
+        // clamping keep working without setting this up.
+        public IReadOnlySet<int> SupportedSampleRates { get; set; } = new HashSet<int>();
+
         public DeviceFormat? GetCurrentFormat() => Current;
 
         public bool ApplyTargetFormat(DeviceFormat target)
@@ -45,6 +50,8 @@ public class TrackSyncCoordinatorTests
             Current = target;
             return true;
         }
+
+        public IReadOnlySet<int> GetSupportedSampleRates(int bitDepth) => SupportedSampleRates;
     }
 
     [Fact]
@@ -62,6 +69,51 @@ public class TrackSyncCoordinatorTests
         Assert.Equal(resolution.Target, deviceController.LastAppliedTarget);
         Assert.Equal(resolution, coordinator.Resolution);
         Assert.Equal(resolution.Target, coordinator.DeviceFormat);
+    }
+
+    [Fact]
+    public void TrackChanged_applies_the_resolvers_target_unchanged_when_the_device_supports_it()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolution = new FormatResolution(new DeviceFormat(96_000, 24), ResolutionConfidence.Exact, "Catalog match");
+        var resolver = new FakeResolver(resolution);
+        var deviceController = new FakeDeviceController { SupportedSampleRates = new HashSet<int> { 44_100, 96_000 } };
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController);
+
+        watcher.Fire(new Track("Title", "Artist", "Album"));
+
+        Assert.Equal(resolution.Target, coordinator.AppliedFormat);
+        Assert.Equal(resolution.Target, deviceController.LastAppliedTarget);
+    }
+
+    [Fact]
+    public void TrackChanged_clamps_the_resolvers_target_to_the_devices_best_supported_rate_before_applying_it()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolution = new FormatResolution(new DeviceFormat(192_000, 24), ResolutionConfidence.Exact, "Catalog match");
+        var resolver = new FakeResolver(resolution);
+        var deviceController = new FakeDeviceController { SupportedSampleRates = new HashSet<int> { 44_100, 48_000 } };
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController);
+
+        watcher.Fire(new Track("Title", "Artist", "Album"));
+
+        var expectedApplied = new DeviceFormat(48_000, 24);
+        Assert.Equal(expectedApplied, coordinator.AppliedFormat);
+        Assert.Equal(expectedApplied, deviceController.LastAppliedTarget);
+        Assert.NotEqual(coordinator.Resolution!.Target, coordinator.AppliedFormat);
+    }
+
+    [Fact]
+    public void TrackChanged_to_null_clears_the_applied_format_alongside_the_resolution()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(new FormatResolution(new DeviceFormat(44_100, 24), ResolutionConfidence.Fallback, "Tier fallback"));
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, new FakeDeviceController());
+
+        watcher.Fire(new Track("Title", "Artist", "Album"));
+        watcher.Fire(null);
+
+        Assert.Null(coordinator.AppliedFormat);
     }
 
     [Fact]

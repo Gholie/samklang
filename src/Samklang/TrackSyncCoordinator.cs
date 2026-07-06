@@ -8,10 +8,13 @@ namespace Samklang;
 
 /// <summary>
 /// Wires the tracer-bullet pipeline together: on every Track change reported by the
-/// <see cref="ITrackWatcher"/>, runs the <see cref="IFormatResolver"/> and applies the result via
-/// the <see cref="IDeviceController"/>. Exposes the current Track, Format Resolution, and live
-/// Device Format as notifying properties so a UI (MainWindow) can bind or subscribe without
-/// knowing anything about SMTC, the resolver chain, or COM.
+/// <see cref="ITrackWatcher"/>, runs the <see cref="IFormatResolver"/>, clamps its Target Format
+/// to a rate the default render device actually supports (<see cref="RateFamilyClamp"/>, using
+/// capabilities probed via <see cref="IDeviceController.GetSupportedSampleRates"/>), and applies
+/// the clamped result via the <see cref="IDeviceController"/>. Exposes the current Track, Format
+/// Resolution, clamped Applied Format, and live Device Format as notifying properties so a UI
+/// (MainWindow) can bind or subscribe — including showing requested vs. applied when clamping
+/// changed the rate — without knowing anything about SMTC, the resolver chain, or COM.
 ///
 /// Framework-free by design, so this whole pipeline is unit-testable with fakes for all three
 /// collaborators, independent of WPF.
@@ -36,6 +39,13 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
     /// <summary>The most recent Format Resolution (Target Format + Confidence), or null before the first Track.</summary>
     public FormatResolution? Resolution { get; private set; }
 
+    /// <summary>
+    /// The Target Format actually applied to the device for the current Track, after rate-family
+    /// clamping — or null before the first Track. Equal to <c>Resolution.Target</c> unless the
+    /// device didn't support the requested rate, in which case the UI should show both.
+    /// </summary>
+    public DeviceFormat? AppliedFormat { get; private set; }
+
     /// <summary>The default render device's actual, live Device Format.</summary>
     public DeviceFormat? DeviceFormat { get; private set; }
 
@@ -59,13 +69,19 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
         {
             Resolution = null;
             OnPropertyChanged(nameof(Resolution));
+            AppliedFormat = null;
+            OnPropertyChanged(nameof(AppliedFormat));
             return;
         }
 
         Resolution = _resolver.Resolve(e.Track);
         OnPropertyChanged(nameof(Resolution));
 
-        _deviceController.ApplyTargetFormat(Resolution.Target);
+        var supportedSampleRates = _deviceController.GetSupportedSampleRates(Resolution.Target.BitDepth);
+        AppliedFormat = RateFamilyClamp.Clamp(Resolution.Target, supportedSampleRates);
+        OnPropertyChanged(nameof(AppliedFormat));
+
+        _deviceController.ApplyTargetFormat(AppliedFormat.Value);
         RefreshDeviceFormat();
     }
 
