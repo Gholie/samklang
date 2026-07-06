@@ -18,7 +18,8 @@ public sealed class SettingsManager(ISettingsStore store) : INotifyPropertyChang
     /// The live Settings. Populated by <see cref="LoadOrSeed"/>; do not read before calling it.
     /// </summary>
     public Settings Current { get; private set; } =
-        new(FallbackRestingFormat, Settings.DefaultGracePeriod, Settings.DefaultDeviceTargetingMode, PinnedDeviceId: null);
+        new(FallbackRestingFormat, Settings.DefaultGracePeriod, Settings.DefaultDeviceTargetingMode, PinnedDeviceId: null,
+            TierSampleRates: TierSampleRateMapping.Default);
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -42,7 +43,8 @@ public sealed class SettingsManager(ISettingsStore store) : INotifyPropertyChang
             currentDeviceFormat ?? FallbackRestingFormat,
             Settings.DefaultGracePeriod,
             Settings.DefaultDeviceTargetingMode,
-            PinnedDeviceId: null);
+            PinnedDeviceId: null,
+            TierSampleRates: TierSampleRateMapping.Default);
         store.Save(seeded);
         Current = seeded;
         OnPropertyChanged(nameof(Current));
@@ -73,6 +75,14 @@ public sealed class SettingsManager(ISettingsStore store) : INotifyPropertyChang
     public void UpdateStorefrontOverride(string? storefrontOverride)
     {
         Current = Current with { StorefrontOverride = string.IsNullOrWhiteSpace(storefrontOverride) ? null : storefrontOverride.Trim() };
+        store.Save(Current);
+        OnPropertyChanged(nameof(Current));
+    }
+
+    /// <summary>Updates and persists the per-Audio-Tier sample-rate mapping, e.g. from the settings view.</summary>
+    public void UpdateTierSampleRates(TierSampleRateMapping tierSampleRates)
+    {
+        Current = Current with { TierSampleRates = tierSampleRates };
         store.Save(Current);
         OnPropertyChanged(nameof(Current));
     }
