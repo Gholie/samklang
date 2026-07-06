@@ -10,10 +10,11 @@ using Samklang.Resolver.PlayCache;
 using Samklang.Sessions;
 using Samklang.SettingsManagement;
 using Samklang.Timing;
+using Samklang.ViewModels;
 
 namespace Samklang;
 
-public partial class MainWindow : Window
+public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 {
     private readonly SmtcTrackWatcher _trackWatcher;
     private readonly IDeviceController _deviceController;
@@ -38,6 +39,11 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // Issue #9: follows the live Windows light/dark theme (and accent color) from here on —
+        // the Light theme merged into App.xaml is just the initial resource load before this
+        // takes over.
+        Wpf.Ui.Appearance.SystemThemeWatcher.Watch(this);
+
         _trackWatcher = new SmtcTrackWatcher();
         _deviceController = new DeviceController(new PolicyConfigAudioEndpoint());
 
@@ -56,7 +62,11 @@ public partial class MainWindow : Window
 
         _coordinator = new TrackSyncCoordinator(_trackWatcher, resolver, _deviceController, reverter);
         catalogLayer.LateResolutionAvailable += (_, args) => Dispatcher.BeginInvoke(() => _coordinator.ApplyLateResolution(args.Track, args.Resolution));
-        _coordinator.PropertyChanged += (_, _) => Dispatcher.BeginInvoke(UpdateDisplay);
+
+        // The tray tooltip isn't bindable (it lives on a Forms NotifyIcon, not a WPF element), so
+        // it's still updated directly from the coordinator here. The dashboard/settings displays
+        // themselves are driven by DashboardViewModel/SettingsViewModel below instead.
+        _coordinator.PropertyChanged += (_, _) => Dispatcher.BeginInvoke(UpdateTrayTooltip);
 
         _startupRegistration = new RegistryStartupRegistration();
 
@@ -70,6 +80,17 @@ public partial class MainWindow : Window
         _pollTimer.Tick += (_, _) => _coordinator.CheckGracePeriodRevert();
 
         (_notifyIcon, _pauseMenuItem) = CreateNotifyIcon();
+
+        // MVVM split (issue #9): TrackSyncCoordinator's PropertyChanged already fires off the
+        // SMTC/COM thread, so DashboardViewModel is given a UI-thread invoker that marshals its
+        // reactions through this window's Dispatcher — required because History is an
+        // ObservableCollection a bound ListView enumerates live, which throws if mutated off the
+        // UI thread.
+        var dashboardViewModel = new DashboardViewModel(_coordinator, uiThreadInvoker: action => Dispatcher.BeginInvoke(action));
+        var settingsViewModel = new SettingsViewModel(_settingsManager, _deviceController, _startupRegistration);
+        DataContext = new MainViewModel(dashboardViewModel, settingsViewModel);
+
+        UpdateTrayTooltip();
     }
 
     private static DeviceFormat? TryGetCurrentDeviceFormat(IDeviceController deviceController)
@@ -89,8 +110,6 @@ public partial class MainWindow : Window
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        UpdateDisplay();
-        LoadSettingsIntoForm();
         _pollTimer.Start();
 
         try
@@ -213,60 +232,9 @@ public partial class MainWindow : Window
         return System.Drawing.SystemIcons.Application;
     }
 
-    private void UpdateDisplay()
-    {
-        var track = _coordinator.CurrentTrack;
-        TrackText.Text = track is null
-            ? "(none — waiting for Apple Music)"
-            : $"{track.Title} — {track.Artist} ({track.Album})";
-
-        var resolution = _coordinator.Resolution;
-        TargetFormatText.Text = resolution?.Target.ToString() ?? "—";
-        ConfidenceText.Text = resolution?.Confidence.ToString() ?? "—";
-
-        // The coordinator clamps the requested Target Format to a rate the device actually
-        // supports (Samklang.Domain.RateFamilyClamp) before applying it; when that changed the
-        // rate, show both so the user isn't left wondering why playback isn't at the rate the
-        // track list implies.
-        var applied = _coordinator.AppliedFormat;
-        if (resolution is not null && applied is not null && applied.Value != resolution.Target)
-        {
-            ClampedFormatRow.Visibility = Visibility.Visible;
-            ClampedFormatText.Text = $"{applied} (device doesn't support {resolution.Target})";
-        }
-        else
-        {
-            ClampedFormatRow.Visibility = Visibility.Collapsed;
-        }
-
-        DeviceFormatText.Text = _coordinator.DeviceFormat?.ToString() ?? "—";
-
-        var targetStatus = _coordinator.TargetStatus;
-        if (targetStatus is null)
-        {
-            DeviceTargetStatusText.Text = string.Empty;
-            DeviceTargetStatusText.Visibility = Visibility.Collapsed;
-        }
-        else if (targetStatus.IsFallback)
-        {
-            // Per this issue's acceptance criteria: a pinned device that's gone missing must
-            // fall back gracefully but stay visible to the user, not fail silently.
-            DeviceTargetStatusText.Text =
-                $"Pinned device unavailable — using Windows default ({targetStatus.FriendlyName ?? "unknown"}) instead.";
-            DeviceTargetStatusText.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            DeviceTargetStatusText.Text = string.Empty;
-            DeviceTargetStatusText.Visibility = Visibility.Collapsed;
-        }
-
-        UpdateTrayTooltip();
-    }
-
     /// <summary>
     /// Keeps the tray icon's tooltip reflecting live status (current Track and applied format,
-    /// per issue #8's acceptance criteria) every time <see cref="UpdateDisplay"/> runs.
+    /// per issue #8's acceptance criteria) every time the coordinator's state changes.
     /// </summary>
     private void UpdateTrayTooltip()
     {
@@ -279,86 +247,5 @@ public partial class MainWindow : Window
 
         // NotifyIcon.Text throws if longer than 127 characters.
         _notifyIcon.Text = tooltip.Length > 127 ? tooltip[..127] : tooltip;
-    }
-
-    private void LoadSettingsIntoForm()
-    {
-        var settings = _settingsManager.Current;
-        RestingSampleRateBox.Text = settings.RestingFormat.SampleRateHz.ToString();
-        RestingBitDepthBox.Text = settings.RestingFormat.BitDepth.ToString();
-        GracePeriodSecondsBox.Text = settings.GracePeriod.TotalSeconds.ToString("0");
-
-        FollowDefaultRadio.IsChecked = settings.DeviceTargetingMode == DeviceTargetingMode.FollowDefault;
-        PinDeviceRadio.IsChecked = settings.DeviceTargetingMode == DeviceTargetingMode.Pinned;
-
-        RefreshDevicePickerItems();
-        if (settings.PinnedDeviceId is not null)
-        {
-            DevicePickerBox.SelectedValue = settings.PinnedDeviceId;
-        }
-
-        SettingsStatusText.Text = string.Empty;
-
-        // The Run-key registration (not a Settings field) is the source of truth for whether
-        // Start-with-Windows is enabled — see IStartupRegistration — so this reads it live
-        // rather than from persisted Settings.
-        StartWithWindowsCheckBox.IsChecked = _startupRegistration.IsEnabled;
-    }
-
-    /// <summary>Repopulates the device picker from the render devices Windows currently reports as active.</summary>
-    private void RefreshDevicePickerItems()
-    {
-        var previouslySelected = DevicePickerBox.SelectedValue as string;
-        DevicePickerBox.ItemsSource = _deviceController.GetActiveRenderDevices();
-        DevicePickerBox.DisplayMemberPath = nameof(RenderDevice.FriendlyName);
-        DevicePickerBox.SelectedValuePath = nameof(RenderDevice.Id);
-        if (previouslySelected is not null)
-        {
-            DevicePickerBox.SelectedValue = previouslySelected;
-        }
-    }
-
-    private void RefreshDevicesButton_Click(object sender, RoutedEventArgs e) => RefreshDevicePickerItems();
-
-    private void SaveSettingsButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!int.TryParse(RestingSampleRateBox.Text, out var sampleRateHz) || sampleRateHz <= 0 ||
-            !int.TryParse(RestingBitDepthBox.Text, out var bitDepth) || bitDepth <= 0 ||
-            !double.TryParse(GracePeriodSecondsBox.Text, out var gracePeriodSeconds) || gracePeriodSeconds < 0)
-        {
-            SettingsStatusText.Text = "Invalid values — not saved.";
-            return;
-        }
-
-        var targetingMode = PinDeviceRadio.IsChecked == true ? DeviceTargetingMode.Pinned : DeviceTargetingMode.FollowDefault;
-        var pinnedDeviceId = DevicePickerBox.SelectedValue as string;
-        if (targetingMode == DeviceTargetingMode.Pinned && pinnedDeviceId is null)
-        {
-            SettingsStatusText.Text = "Pick a device to pin — not saved.";
-            return;
-        }
-
-        _settingsManager.UpdateRestingFormat(new DeviceFormat(sampleRateHz, bitDepth));
-        _settingsManager.UpdateGracePeriod(TimeSpan.FromSeconds(gracePeriodSeconds));
-        _settingsManager.UpdateDeviceTargeting(targetingMode, pinnedDeviceId);
-        _deviceController.SetTargeting(targetingMode, pinnedDeviceId);
-        SettingsStatusText.Text = "Saved.";
-    }
-
-    /// <summary>
-    /// Applies immediately rather than waiting for "Save settings", since this toggle drives the
-    /// Run-key registration directly (see IStartupRegistration) rather than a persisted Setting
-    /// — there's no "unsaved" state for it to sit in.
-    /// </summary>
-    private void StartWithWindowsCheckBox_Click(object sender, RoutedEventArgs e)
-    {
-        if (StartWithWindowsCheckBox.IsChecked == true)
-        {
-            _startupRegistration.Enable();
-        }
-        else
-        {
-            _startupRegistration.Disable();
-        }
     }
 }

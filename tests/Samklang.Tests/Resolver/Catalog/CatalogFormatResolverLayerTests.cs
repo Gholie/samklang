@@ -72,6 +72,10 @@ public class CatalogFormatResolverLayerTests
         Assert.Equal(new DeviceFormat(96_000, 24), result!.Target);
         Assert.Equal(ResolutionConfidence.Exact, result.Confidence);
         Assert.Equal(layer.Name, result.SourceLayer);
+        // ParseBestLosslessFormat only ever matches ALAC variants, so every resolution this layer
+        // produces is genuinely lossless — a dashboard consumer must be able to trust this flag
+        // rather than inferring losslessness from Confidence (see AudioTierClassifier).
+        Assert.True(result.IsLossless);
     }
 
     [Fact]
