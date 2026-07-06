@@ -27,10 +27,18 @@ public sealed class PlayCachePaths : IPlayCacheLocator
 
     /// <summary>
     /// The Apple Music package's PlayCache directory, or null if no matching package folder is
-    /// installed. The returned path is not guaranteed to exist — callers check that themselves.
+    /// installed, or the package has no <c>AMPLibraryAgent</c> folder, or none of its
+    /// subdirectories look like a PlayCache. The returned path is not guaranteed to exist beyond
+    /// that last check — callers still handle races/removal themselves.
     /// </summary>
+    /// <remarks>
+    /// A real Windows 11 install (issue #20) named this directory <c>SubscriptionPlayCache</c>,
+    /// not the originally assumed <c>PlayCache</c> — and other app/install versions may use yet
+    /// another name — so this matches any subdirectory of <c>AMPLibraryAgent</c> whose name
+    /// contains "PlayCache" (case-insensitive) rather than hard-coding one exact name.
+    /// </remarks>
     public string? PlayCacheDirectory => TryFindPackageRoot() is { } packageRoot
-        ? Path.Combine(packageRoot, "LocalCache", "Local", "Apple", "AMPLibraryAgent", "PlayCache")
+        ? TryFindPlayCacheDirectory(Path.Combine(packageRoot, "LocalCache", "Local", "Apple", "AMPLibraryAgent"))
         : null;
 
     /// <summary>Path to the PlayCache directory's item-metadata plist (access-date/cloud-id per cached item).</summary>
@@ -56,6 +64,30 @@ public sealed class PlayCachePaths : IPlayCacheLocator
         {
             // Packages folder unreadable for any reason — no PlayCache path to offer; the layer
             // treats this the same as "not installed."
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Finds the first subdirectory of <paramref name="amplibraryAgentDirectory"/> whose name
+    /// contains "PlayCache" (e.g. <c>PlayCache</c> or the real-world <c>SubscriptionPlayCache</c>),
+    /// or null if that folder doesn't exist or none of its children match.
+    /// </summary>
+    private static string? TryFindPlayCacheDirectory(string amplibraryAgentDirectory)
+    {
+        try
+        {
+            if (!Directory.Exists(amplibraryAgentDirectory))
+            {
+                return null;
+            }
+
+            return Directory.EnumerateDirectories(amplibraryAgentDirectory)
+                .FirstOrDefault(directory =>
+                    Path.GetFileName(directory).Contains("PlayCache", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
             return null;
         }
     }
