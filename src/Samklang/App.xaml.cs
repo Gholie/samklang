@@ -1,7 +1,83 @@
+using System.Threading;
 using System.Windows;
 
 namespace Samklang;
 
-public partial class App : Application
+/// <summary>
+/// Composition root's entry point. Beyond the usual WPF startup, this enforces the single-instance
+/// guard (issue #8): a second launch detects the first via a named <see cref="Mutex"/> and, rather
+/// than opening a second <see cref="MainWindow"/>, signals the first instance through a named
+/// <see cref="EventWaitHandle"/> to restore itself, then exits immediately.
+///
+/// <see cref="ShutdownMode"/> is set to <c>OnExplicitShutdown</c> in App.xaml because
+/// <see cref="MainWindow"/> now hides to the tray on close instead of really closing — the app
+/// only exits via <c>MainWindow.ExitApplication</c>, which calls
+/// <see cref="System.Windows.Application.Shutdown()"/> directly.
+/// </summary>
+public partial class App : System.Windows.Application
 {
+    // Fixed GUID suffixes so these kernel object names are stable across builds/versions and
+    // won't collide with an unrelated app's Mutex/Event of the same short name.
+    private const string MutexName = "Samklang-SingleInstance-3F2504E0-4F89-11D3-9A0C-0305E82C3301";
+    private const string ActivateEventName = "Samklang-Activate-3F2504E0-4F89-11D3-9A0C-0305E82C3301";
+
+    private Mutex? _instanceMutex;
+    private EventWaitHandle? _activateEvent;
+    private RegisteredWaitHandle? _activateRegisteredWait;
+
+    protected override void OnStartup(StartupEventArgs e)
+    {
+        _instanceMutex = new Mutex(initiallyOwned: true, name: MutexName, out var createdNew);
+        if (!createdNew)
+        {
+            NotifyRunningInstanceAndExit();
+            return;
+        }
+
+        // Owned for as long as this instance runs; a later launch that loses the Mutex race
+        // signals this event instead of starting its own window.
+        _activateEvent = new EventWaitHandle(initialState: false, EventResetMode.AutoReset, ActivateEventName);
+        _activateRegisteredWait = ThreadPool.RegisterWaitForSingleObject(
+            _activateEvent,
+            (_, _) => Dispatcher.BeginInvoke(RestoreMainWindow),
+            state: null,
+            timeout: Timeout.InfiniteTimeSpan,
+            executeOnlyOnce: false);
+
+        base.OnStartup(e);
+    }
+
+    private void NotifyRunningInstanceAndExit()
+    {
+        try
+        {
+            using var existingEvent = EventWaitHandle.OpenExisting(ActivateEventName);
+            existingEvent.Set();
+        }
+        catch (WaitHandleCannotBeOpenedException)
+        {
+            // Vanishingly small startup race: the first instance won the Mutex but hasn't
+            // created its activation Event yet. Nothing to signal, but this instance still
+            // shouldn't start a second window — the user can just try again.
+        }
+
+        Shutdown();
+    }
+
+    private void RestoreMainWindow()
+    {
+        if (MainWindow is MainWindow mainWindow)
+        {
+            mainWindow.RestoreFromTray();
+        }
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _activateRegisteredWait?.Unregister(null);
+        _activateEvent?.Dispose();
+        _instanceMutex?.ReleaseMutex();
+        _instanceMutex?.Dispose();
+        base.OnExit(e);
+    }
 }

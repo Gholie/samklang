@@ -5,9 +5,11 @@
         Width="520" Height="480"
         WindowStartupLocation="CenterScreen"
         Loaded="Window_Loaded"
+        Closing="Window_Closing"
         Closed="Window_Closed">
     <Grid Margin="24">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -79,7 +81,11 @@
             </StackPanel>
         </StackPanel>
 
-        <StackPanel Grid.Row="10" Orientation="Horizontal" Margin="0,0,0,12">
+        <StackPanel Grid.Row="10" Orientation="Horizontal" Margin="0,0,0,8">
+            <CheckBox x:Name="StartWithWindowsCheckBox" Content="Start with Windows" VerticalAlignment="Center" Click="StartWithWindowsCheckBox_Click" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="11" Orientation="Horizontal" Margin="0,0,0,12">
             <Button x:Name="SaveSettingsButton" Content="Save settings" Padding="12,4" Click="SaveSettingsButton_Click" />
             <TextBlock x:Name="SettingsStatusText" Margin="12,0,0,0" VerticalAlignment="Center" />
         </StackPanel>
