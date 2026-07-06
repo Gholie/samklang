@@ -1,93 +1,162 @@
-<Window x:Class="Samklang.MainWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Samklang"
-        Width="520" Height="480"
-        WindowStartupLocation="CenterScreen"
-        Loaded="Window_Loaded"
-        Closing="Window_Closing"
-        Closed="Window_Closed">
-    <Grid Margin="24">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+<ui:FluentWindow x:Class="Samklang.MainWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 Title="Samklang"
+                 Width="640" Height="640"
+                 MinWidth="480" MinHeight="420"
+                 WindowStartupLocation="CenterScreen"
+                 Loaded="Window_Loaded"
+                 Closing="Window_Closing"
+                 Closed="Window_Closed">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </Window.Resources>
 
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
-            <TextBlock Text="Track: " FontWeight="Bold" />
-            <TextBlock x:Name="TrackText" Text="(none — waiting for Apple Music)" />
-        </StackPanel>
+    <TabControl Margin="16">
+        <!-- Now-playing panel + recent-switch history (issue #9). -->
+        <TabItem Header="Dashboard">
+            <Grid DataContext="{Binding Dashboard}" Margin="16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="12" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,12">
-            <TextBlock Text="Target format: " FontWeight="Bold" />
-            <TextBlock x:Name="TargetFormatText" Text="—" />
-        </StackPanel>
+                <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+                    <TextBlock Text="Track: " FontWeight="Bold" />
+                    <TextBlock Text="{Binding TrackDisplay}" TextWrapping="Wrap" />
+                </StackPanel>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,12" x:Name="ClampedFormatRow" Visibility="Collapsed">
-            <TextBlock Text="Clamped to: " FontWeight="Bold" />
-            <TextBlock x:Name="ClampedFormatText" Text="—" />
-        </StackPanel>
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+                    <TextBlock Text="Audio Tier: " FontWeight="Bold" />
+                    <Border Background="#3350C8" CornerRadius="4" Padding="8,2">
+                        <TextBlock Text="{Binding AudioTierDisplay}" Foreground="White" FontSize="12" />
+                    </Border>
+                </StackPanel>
 
-        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,12">
-            <TextBlock Text="Confidence: " FontWeight="Bold" />
-            <TextBlock x:Name="ConfidenceText" Text="—" />
-        </StackPanel>
+                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
+                    <TextBlock Text="Target format: " FontWeight="Bold" />
+                    <TextBlock Text="{Binding TargetFormatDisplay}" />
+                </StackPanel>
 
-        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,0,0,8">
-            <TextBlock Text="Device format: " FontWeight="Bold" />
-            <TextBlock x:Name="DeviceFormatText" Text="—" />
-        </StackPanel>
+                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,10"
+                            Visibility="{Binding HasClampedFormat, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="Clamped to: " FontWeight="Bold" />
+                    <TextBlock Text="{Binding ClampedFormatDisplay}" TextWrapping="Wrap" />
+                </StackPanel>
 
-        <TextBlock Grid.Row="5" x:Name="DeviceTargetStatusText" Foreground="DarkOrange" TextWrapping="Wrap"
-                   Margin="0,0,0,24" Visibility="Collapsed" />
+                <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,0,0,10">
+                    <TextBlock Text="Confidence: " FontWeight="Bold" />
+                    <TextBlock Text="{Binding ConfidenceDisplay}" />
+                    <TextBlock Text=" (" />
+                    <TextBlock Text="{Binding SourceLayerDisplay}" />
+                    <TextBlock Text=")" />
+                </StackPanel>
 
-        <TextBlock Grid.Row="6" Text="Settings" FontWeight="Bold" Margin="0,0,0,8" />
+                <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,0,0,10">
+                    <TextBlock Text="Device format: " FontWeight="Bold" />
+                    <TextBlock Text="{Binding DeviceFormatDisplay}" />
+                </StackPanel>
 
-        <StackPanel Grid.Row="7" Orientation="Horizontal" Margin="0,0,0,8">
-            <TextBlock Text="Resting Format — sample rate (Hz):" Width="220" VerticalAlignment="Center" />
-            <TextBox x:Name="RestingSampleRateBox" Width="90" />
-            <TextBlock Text="bit depth:" VerticalAlignment="Center" Margin="16,0,8,0" />
-            <TextBox x:Name="RestingBitDepthBox" Width="50" />
-        </StackPanel>
+                <TextBlock Grid.Row="6" Text="{Binding DeviceTargetWarningMessage}" Foreground="DarkOrange" TextWrapping="Wrap"
+                           Margin="0,0,0,10" Visibility="{Binding HasDeviceTargetWarning, Converter={StaticResource BoolToVis}}" />
 
-        <StackPanel Grid.Row="8" Orientation="Horizontal" Margin="0,0,0,8">
-            <TextBlock Text="Grace Period (seconds):" Width="220" VerticalAlignment="Center" />
-            <TextBox x:Name="GracePeriodSecondsBox" Width="90" />
-        </StackPanel>
+                <TextBlock Grid.Row="7" Text="Switching paused" Foreground="DarkOrange" FontWeight="Bold"
+                           Margin="0,0,0,10" Visibility="{Binding IsPaused, Converter={StaticResource BoolToVis}}" />
 
-        <StackPanel Grid.Row="9" Margin="0,0,0,8">
-            <TextBlock Text="Device targeting:" Margin="0,0,0,4" />
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                <RadioButton x:Name="FollowDefaultRadio" GroupName="DeviceTargeting" Content="Follow Windows default"
-                             VerticalAlignment="Center" Margin="0,0,16,0" />
-                <RadioButton x:Name="PinDeviceRadio" GroupName="DeviceTargeting" Content="Pin a specific device"
-                             VerticalAlignment="Center" />
-            </StackPanel>
-            <StackPanel Orientation="Horizontal">
-                <ComboBox x:Name="DevicePickerBox" Width="280" />
-                <Button x:Name="RefreshDevicesButton" Content="Refresh" Padding="8,2" Margin="8,0,0,0"
-                        Click="RefreshDevicesButton_Click" />
-            </StackPanel>
-        </StackPanel>
+                <TextBlock Grid.Row="9" Text="Recent switches" FontWeight="Bold" Margin="0,0,0,8" />
 
-        <StackPanel Grid.Row="10" Orientation="Horizontal" Margin="0,0,0,8">
-            <CheckBox x:Name="StartWithWindowsCheckBox" Content="Start with Windows" VerticalAlignment="Center" Click="StartWithWindowsCheckBox_Click" />
-        </StackPanel>
+                <ListView Grid.Row="10" ItemsSource="{Binding History}">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="Time" DisplayMemberBinding="{Binding TimestampDisplay}" Width="70" />
+                            <GridViewColumn Header="Track" DisplayMemberBinding="{Binding TrackDisplay}" Width="200" />
+                            <GridViewColumn Header="Target format" DisplayMemberBinding="{Binding TargetFormatDisplay}" Width="110" />
+                            <GridViewColumn Header="Audio Tier" DisplayMemberBinding="{Binding AudioTierDisplay}" Width="100" />
+                            <GridViewColumn Header="Confidence" DisplayMemberBinding="{Binding ConfidenceDisplay}" Width="90" />
+                            <GridViewColumn Header="Source layer" DisplayMemberBinding="{Binding SourceLayer}" Width="100" />
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+            </Grid>
+        </TabItem>
 
-        <StackPanel Grid.Row="11" Orientation="Horizontal" Margin="0,0,0,12">
-            <Button x:Name="SaveSettingsButton" Content="Save settings" Padding="12,4" Click="SaveSettingsButton_Click" />
-            <TextBlock x:Name="SettingsStatusText" Margin="12,0,0,0" VerticalAlignment="Center" />
-        </StackPanel>
-    </Grid>
-</Window>
+        <!-- Settings: device targeting, tier mappings, Resting Format, Grace Period, autostart (issue #9). -->
+        <TabItem Header="Settings">
+            <ScrollViewer DataContext="{Binding Settings}" VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="16">
+                    <TextBlock Text="Resting Format" FontWeight="Bold" Margin="0,0,0,8" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <TextBlock Text="Sample rate (Hz):" Width="160" VerticalAlignment="Center" />
+                        <TextBox Text="{Binding RestingSampleRateHzText, UpdateSourceTrigger=PropertyChanged}" Width="90" />
+                        <TextBlock Text="Bit depth:" VerticalAlignment="Center" Margin="16,0,8,0" />
+                        <TextBox Text="{Binding RestingBitDepthText, UpdateSourceTrigger=PropertyChanged}" Width="50" />
+                    </StackPanel>
+
+                    <TextBlock Text="Grace Period" FontWeight="Bold" Margin="0,0,0,8" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <TextBlock Text="Seconds idle before reverting:" Width="220" VerticalAlignment="Center" />
+                        <TextBox Text="{Binding GracePeriodSecondsText, UpdateSourceTrigger=PropertyChanged}" Width="90" />
+                    </StackPanel>
+
+                    <TextBlock Text="Device targeting" FontWeight="Bold" Margin="0,0,0,8" />
+                    <StackPanel Margin="0,0,0,16">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <RadioButton GroupName="DeviceTargeting" Content="Follow Windows default"
+                                         IsChecked="{Binding IsFollowDefaultMode}" VerticalAlignment="Center" Margin="0,0,16,0" />
+                            <RadioButton GroupName="DeviceTargeting" Content="Pin a specific device"
+                                         IsChecked="{Binding IsPinnedMode}" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <ComboBox Width="280"
+                                      ItemsSource="{Binding AvailableDevices}"
+                                      DisplayMemberPath="FriendlyName"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding SelectedDeviceId}" />
+                            <Button Content="Refresh" Padding="8,2" Margin="8,0,0,0" Command="{Binding RefreshDevicesCommand}" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <TextBlock Text="Tier mappings — sample rate (Hz) per Audio Tier" FontWeight="Bold" Margin="0,0,0,8" />
+                    <StackPanel Margin="0,0,0,16">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="Lossy Stereo:" Width="160" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding LossyStereoHzText, UpdateSourceTrigger=PropertyChanged}" Width="90" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="Lossless:" Width="160" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding LosslessHzText, UpdateSourceTrigger=PropertyChanged}" Width="90" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="Hi-Res Lossless:" Width="160" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding HiResLosslessHzText, UpdateSourceTrigger=PropertyChanged}" Width="90" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Dolby Atmos:" Width="160" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding DolbyAtmosHzText, UpdateSourceTrigger=PropertyChanged}" Width="90" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <TextBlock Text="Startup" FontWeight="Bold" Margin="0,0,0,8" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <CheckBox Content="Start with Windows" IsChecked="{Binding StartWithWindows}" VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Save settings" Padding="12,4" Command="{Binding SaveCommand}" />
+                        <TextBlock Text="{Binding StatusMessage}" Margin="12,0,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+    </TabControl>
+</ui:FluentWindow>
