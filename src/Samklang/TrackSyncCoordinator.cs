@@ -65,9 +65,42 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
     /// </summary>
     public DeviceTargetStatus? TargetStatus { get; private set; }
 
+    /// <summary>
+    /// Whether Track- and Grace-Period-driven format switching is currently suppressed (the tray
+    /// menu's "Pause switching"). Track and Playback State are still observed while paused — so a
+    /// tray tooltip bound to <see cref="CurrentTrack"/> stays live — but no Target Format is
+    /// resolved or applied to the device, and no idle tracking towards a Grace Period revert
+    /// happens, until <see cref="Resume"/> is called.
+    /// </summary>
+    public bool IsPaused { get; private set; }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public Task StartAsync() => _trackWatcher.StartAsync();
+
+    /// <summary>Suppresses format switching until <see cref="Resume"/> is called. Idempotent while already paused.</summary>
+    public void Pause()
+    {
+        if (IsPaused)
+        {
+            return;
+        }
+
+        IsPaused = true;
+        OnPropertyChanged(nameof(IsPaused));
+    }
+
+    /// <summary>Resumes format switching after a prior <see cref="Pause"/>. Idempotent while not paused.</summary>
+    public void Resume()
+    {
+        if (!IsPaused)
+        {
+            return;
+        }
+
+        IsPaused = false;
+        OnPropertyChanged(nameof(IsPaused));
+    }
 
     /// <summary>
     /// Re-reads the effective device's actual Device Format and targeting status, for callers
@@ -91,7 +124,11 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
     /// </summary>
     public void CheckGracePeriodRevert()
     {
-        _reverter.Tick();
+        if (!IsPaused)
+        {
+            _reverter.Tick();
+        }
+
         RefreshDeviceFormat();
     }
 
@@ -99,6 +136,15 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
     {
         CurrentTrack = e.Track;
         OnPropertyChanged(nameof(CurrentTrack));
+
+        if (IsPaused)
+        {
+            // Switching is paused: Current Track keeps updating above (so a tray tooltip stays
+            // live), but resolving/applying a Target Format is suppressed entirely, including the
+            // idle notification below — otherwise a paused idle period would silently queue up a
+            // Grace Period revert that fires the moment Resume() is called.
+            return;
+        }
 
         if (e.Track is null)
         {
@@ -150,6 +196,11 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
 
     private void OnPlaybackStateChanged(object? sender, PlaybackStateChangedEventArgs e)
     {
+        if (IsPaused)
+        {
+            return;
+        }
+
         if (e.State == PlaybackState.Playing)
         {
             _reverter.NotifyActive();

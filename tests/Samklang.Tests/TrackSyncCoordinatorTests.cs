@@ -314,4 +314,126 @@ public class TrackSyncCoordinatorTests
         Assert.Equal(1, reverter.TickCallCount);
         Assert.Equal(new DeviceFormat(48_000, 24), coordinator.DeviceFormat);
     }
+
+    [Fact]
+    public void Pause_sets_IsPaused_and_raises_PropertyChanged()
+    {
+        var watcher = new FakeTrackWatcher();
+        var coordinator = new TrackSyncCoordinator(watcher, new FakeResolver(SampleResolution()), new FakeDeviceController(), new FakeRestingFormatReverter());
+        var raisedProperties = new List<string>();
+        coordinator.PropertyChanged += (_, e) => raisedProperties.Add(e.PropertyName!);
+
+        coordinator.Pause();
+
+        Assert.True(coordinator.IsPaused);
+        Assert.Contains(nameof(TrackSyncCoordinator.IsPaused), raisedProperties);
+    }
+
+    [Fact]
+    public void Pause_is_idempotent_and_does_not_raise_PropertyChanged_again()
+    {
+        var watcher = new FakeTrackWatcher();
+        var coordinator = new TrackSyncCoordinator(watcher, new FakeResolver(SampleResolution()), new FakeDeviceController(), new FakeRestingFormatReverter());
+        coordinator.Pause();
+        var raisedCount = 0;
+        coordinator.PropertyChanged += (_, _) => raisedCount++;
+
+        coordinator.Pause();
+
+        Assert.Equal(0, raisedCount);
+    }
+
+    [Fact]
+    public void Resume_clears_IsPaused_and_raises_PropertyChanged()
+    {
+        var watcher = new FakeTrackWatcher();
+        var coordinator = new TrackSyncCoordinator(watcher, new FakeResolver(SampleResolution()), new FakeDeviceController(), new FakeRestingFormatReverter());
+        coordinator.Pause();
+        var raisedProperties = new List<string>();
+        coordinator.PropertyChanged += (_, e) => raisedProperties.Add(e.PropertyName!);
+
+        coordinator.Resume();
+
+        Assert.False(coordinator.IsPaused);
+        Assert.Contains(nameof(TrackSyncCoordinator.IsPaused), raisedProperties);
+    }
+
+    [Fact]
+    public void TrackChanged_while_paused_updates_CurrentTrack_but_does_not_resolve_or_apply_a_format()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(SampleResolution());
+        var deviceController = new FakeDeviceController();
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController, new FakeRestingFormatReverter());
+        coordinator.Pause();
+
+        var track = new Track("Title", "Artist", "Album");
+        watcher.Fire(track);
+
+        Assert.Equal(track, coordinator.CurrentTrack);
+        Assert.Equal(0, resolver.CallCount);
+        Assert.Null(coordinator.Resolution);
+        Assert.Null(coordinator.AppliedFormat);
+        Assert.Null(deviceController.LastAppliedTarget);
+    }
+
+    [Fact]
+    public void TrackChanged_to_null_while_paused_does_not_notify_the_reverter()
+    {
+        var watcher = new FakeTrackWatcher();
+        var reverter = new FakeRestingFormatReverter();
+        var coordinator = new TrackSyncCoordinator(watcher, new FakeResolver(SampleResolution()), new FakeDeviceController(), reverter);
+        coordinator.Pause();
+
+        watcher.Fire(null);
+
+        Assert.Equal(0, reverter.NotifyIdleCallCount);
+    }
+
+    [Fact]
+    public void PlaybackStateChanged_while_paused_does_not_notify_the_reverter()
+    {
+        var watcher = new FakeTrackWatcher();
+        var reverter = new FakeRestingFormatReverter();
+        var coordinator = new TrackSyncCoordinator(watcher, new FakeResolver(SampleResolution()), new FakeDeviceController(), reverter);
+        coordinator.Pause();
+
+        watcher.FirePlaybackState(PlaybackState.Playing);
+        watcher.FirePlaybackState(PlaybackState.Paused);
+
+        Assert.Equal(0, reverter.NotifyActiveCallCount);
+        Assert.Equal(0, reverter.NotifyIdleCallCount);
+    }
+
+    [Fact]
+    public void CheckGracePeriodRevert_while_paused_does_not_tick_the_reverter_but_still_refreshes_the_device_format()
+    {
+        var watcher = new FakeTrackWatcher();
+        var reverter = new FakeRestingFormatReverter();
+        var deviceController = new FakeDeviceController { Current = new DeviceFormat(48_000, 24) };
+        var coordinator = new TrackSyncCoordinator(watcher, new FakeResolver(SampleResolution()), deviceController, reverter);
+        coordinator.Pause();
+
+        coordinator.CheckGracePeriodRevert();
+
+        Assert.Equal(0, reverter.TickCallCount);
+        Assert.Equal(new DeviceFormat(48_000, 24), coordinator.DeviceFormat);
+    }
+
+    [Fact]
+    public void Resume_restores_normal_switching_behavior()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(SampleResolution());
+        var deviceController = new FakeDeviceController();
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController, new FakeRestingFormatReverter());
+        coordinator.Pause();
+        coordinator.Resume();
+
+        watcher.Fire(new Track("Title", "Artist", "Album"));
+
+        Assert.Equal(1, resolver.CallCount);
+        Assert.NotNull(coordinator.AppliedFormat);
+        Assert.NotNull(deviceController.LastAppliedTarget);
+    }
 }

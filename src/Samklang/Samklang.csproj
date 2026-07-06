@@ -5,6 +5,10 @@
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <UseWPF>true</UseWPF>
+    <!-- Only for System.Windows.Forms.NotifyIcon (issue #8's tray icon) — WPF has no native tray
+         API. Fully-qualify Forms/Drawing types at the call site instead of `using`-ing the
+         namespace, since several type names (Application, Timer, ...) collide with WPF's. -->
+    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Samklang</RootNamespace>
