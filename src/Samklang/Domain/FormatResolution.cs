@@ -1,4 +1,4 @@
-namespace AppleMusicWinSync.Domain;
+namespace Samklang.Domain;
 
 /// <summary>How certain a format resolution is.</summary>
 public enum ResolutionConfidence

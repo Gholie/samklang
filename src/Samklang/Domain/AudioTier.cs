@@ -1,4 +1,4 @@
-namespace AppleMusicWinSync.Domain;
+namespace Samklang.Domain;
 
 /// <summary>
 /// Apple's quality classification of a track (catalog <c>audioVariants</c>).

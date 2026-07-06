@@ -1,4 +1,4 @@
-# Apple Music Windows Sync
+# Samklang
 
 A Windows 11 tray utility that switches an audio output device's format (sample rate, bit depth) to match the track currently playing in the Apple Music Windows app, avoiding resampling for lossless playback.
 

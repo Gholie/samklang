@@ -1,4 +1,4 @@
-namespace AppleMusicWinSync.Domain;
+namespace Samklang.Domain;
 
 /// <summary>
 /// The (sample rate, bit depth) pair a Windows audio device operates at in shared mode —

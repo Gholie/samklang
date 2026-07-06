@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace AppleMusicWinSync;
+namespace Samklang;
 
 public partial class MainWindow : Window
 {

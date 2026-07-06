@@ -1,7 +1,7 @@
-using AppleMusicWinSync.Domain;
+using Samklang.Domain;
 using Xunit;
 
-namespace AppleMusicWinSync.Tests.Domain;
+namespace Samklang.Tests.Domain;
 
 public class DeviceFormatTests
 {

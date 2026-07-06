@@ -7,8 +7,8 @@
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>AppleMusicWinSync</RootNamespace>
-    <AssemblyName>AppleMusicWinSync</AssemblyName>
+    <RootNamespace>Samklang</RootNamespace>
+    <AssemblyName>Samklang</AssemblyName>
   </PropertyGroup>
 
 </Project>

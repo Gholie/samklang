@@ -1,4 +1,4 @@
-namespace AppleMusicWinSync.Domain;
+namespace Samklang.Domain;
 
 /// <summary>
 /// The song currently playing in Apple Music, identified by the metadata
