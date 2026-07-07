@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using Samklang.Devices;
 using Samklang.Domain;
 using Samklang.SettingsManagement;
@@ -151,18 +152,18 @@ public sealed class SettingsViewModel : ViewModelBase
         try
         {
             var settings = _settingsManager.Current;
-            RestingSampleRateHzText = settings.RestingFormat.SampleRateHz.ToString();
-            RestingBitDepthText = settings.RestingFormat.BitDepth.ToString();
-            GracePeriodSecondsText = settings.GracePeriod.TotalSeconds.ToString("0");
+            RestingSampleRateHzText = settings.RestingFormat.SampleRateHz.ToString(CultureInfo.InvariantCulture);
+            RestingBitDepthText = settings.RestingFormat.BitDepth.ToString(CultureInfo.InvariantCulture);
+            GracePeriodSecondsText = settings.GracePeriod.TotalSeconds.ToString("0", CultureInfo.InvariantCulture);
 
             IsFollowDefaultMode = settings.DeviceTargetingMode == DeviceTargetingMode.FollowDefault;
             IsPinnedMode = settings.DeviceTargetingMode == DeviceTargetingMode.Pinned;
 
             var tierSampleRates = settings.EffectiveTierSampleRates;
-            LossyStereoHzText = tierSampleRates.LossyStereoHz.ToString();
-            LosslessHzText = tierSampleRates.LosslessHz.ToString();
-            HiResLosslessHzText = tierSampleRates.HiResLosslessHz.ToString();
-            DolbyAtmosHzText = tierSampleRates.DolbyAtmosHz.ToString();
+            LossyStereoHzText = tierSampleRates.LossyStereoHz.ToString(CultureInfo.InvariantCulture);
+            LosslessHzText = tierSampleRates.LosslessHz.ToString(CultureInfo.InvariantCulture);
+            HiResLosslessHzText = tierSampleRates.HiResLosslessHz.ToString(CultureInfo.InvariantCulture);
+            DolbyAtmosHzText = tierSampleRates.DolbyAtmosHz.ToString(CultureInfo.InvariantCulture);
 
             RefreshDevices();
             if (settings.PinnedDeviceId is not null)
@@ -202,9 +203,13 @@ public sealed class SettingsViewModel : ViewModelBase
 
     private void Save()
     {
-        if (!int.TryParse(RestingSampleRateHzText, out var sampleRateHz) || sampleRateHz <= 0 ||
-            !int.TryParse(RestingBitDepthText, out var bitDepth) || bitDepth <= 0 ||
-            !double.TryParse(GracePeriodSecondsText, out var gracePeriodSeconds) || gracePeriodSeconds < 0)
+        // Invariant culture on every numeric parse (and the matching LoadFromSettings formats):
+        // the current culture would reject "2.5" in comma-decimal locales even though this view
+        // itself displayed the value with a dot.
+        if (!TryParsePositiveInt(RestingSampleRateHzText, out var sampleRateHz) ||
+            !TryParsePositiveInt(RestingBitDepthText, out var bitDepth) ||
+            !double.TryParse(GracePeriodSecondsText, NumberStyles.Float, CultureInfo.InvariantCulture, out var gracePeriodSeconds) ||
+            gracePeriodSeconds < 0)
         {
             StatusMessage = "Invalid values — not saved.";
             return;
@@ -223,20 +228,22 @@ public sealed class SettingsViewModel : ViewModelBase
             return;
         }
 
-        _settingsManager.UpdateRestingFormat(new DeviceFormat(sampleRateHz, bitDepth));
-        _settingsManager.UpdateGracePeriod(TimeSpan.FromSeconds(gracePeriodSeconds));
-        _settingsManager.UpdateDeviceTargeting(targetingMode, SelectedDeviceId);
-        _settingsManager.UpdateTierSampleRates(tierSampleRates);
+        _settingsManager.UpdateFromSettingsView(
+            new DeviceFormat(sampleRateHz, bitDepth),
+            TimeSpan.FromSeconds(gracePeriodSeconds),
+            targetingMode,
+            SelectedDeviceId,
+            tierSampleRates);
         _deviceController.SetTargeting(targetingMode, SelectedDeviceId);
         StatusMessage = "Saved.";
     }
 
     private bool TryParseTierSampleRates(out TierSampleRateMapping tierSampleRates)
     {
-        if (int.TryParse(LossyStereoHzText, out var lossyStereoHz) && lossyStereoHz > 0 &&
-            int.TryParse(LosslessHzText, out var losslessHz) && losslessHz > 0 &&
-            int.TryParse(HiResLosslessHzText, out var hiResLosslessHz) && hiResLosslessHz > 0 &&
-            int.TryParse(DolbyAtmosHzText, out var dolbyAtmosHz) && dolbyAtmosHz > 0)
+        if (TryParsePositiveInt(LossyStereoHzText, out var lossyStereoHz) &&
+            TryParsePositiveInt(LosslessHzText, out var losslessHz) &&
+            TryParsePositiveInt(HiResLosslessHzText, out var hiResLosslessHz) &&
+            TryParsePositiveInt(DolbyAtmosHzText, out var dolbyAtmosHz))
         {
             tierSampleRates = new TierSampleRateMapping(lossyStereoHz, losslessHz, hiResLosslessHz, dolbyAtmosHz);
             return true;
@@ -245,4 +252,7 @@ public sealed class SettingsViewModel : ViewModelBase
         tierSampleRates = TierSampleRateMapping.Default;
         return false;
     }
+
+    private static bool TryParsePositiveInt(string text, out int value) =>
+        int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value) && value > 0;
 }

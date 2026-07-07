@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using Samklang.Domain;
@@ -29,8 +30,10 @@ public sealed class PolicyConfigAudioEndpoint : IAudioEndpoint
 
     // Keyed by "{device id}|{bit depth}" — probing is per-device (and, in principle, per bit
     // depth), and this process only ever runs against one bit depth (24-bit, pinned), but keying
-    // on both keeps the cache correct if that ever changes.
-    private readonly Dictionary<string, IReadOnlySet<int>> _supportedSampleRateCache = new();
+    // on both keeps the cache correct if that ever changes. Concurrent because callers reach this
+    // from both SMTC callback threads (track-change switches) and the UI thread (poll timer,
+    // Dispatcher-marshaled late resolutions).
+    private readonly ConcurrentDictionary<string, IReadOnlySet<int>> _supportedSampleRateCache = new();
 
     public DeviceFormat? GetCurrentFormat(string deviceId)
     {
@@ -63,15 +66,9 @@ public sealed class PolicyConfigAudioEndpoint : IAudioEndpoint
     public IReadOnlySet<int> GetSupportedSampleRates(string deviceId, int bitDepth)
     {
         using var device = GetDevice(deviceId);
-        var cacheKey = $"{device.ID}|{bitDepth}";
-        if (_supportedSampleRateCache.TryGetValue(cacheKey, out var cached))
-        {
-            return cached;
-        }
-
-        var supported = ProbeSupportedSampleRates(device, bitDepth);
-        _supportedSampleRateCache[cacheKey] = supported;
-        return supported;
+        return _supportedSampleRateCache.GetOrAdd(
+            $"{device.ID}|{bitDepth}",
+            _ => ProbeSupportedSampleRates(device, bitDepth));
     }
 
     public IReadOnlyList<RenderDevice> GetActiveRenderDevices()

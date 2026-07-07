@@ -24,9 +24,14 @@ public sealed class RegistryStartupRegistration : IStartupRegistration
     {
         get
         {
+            // Presence of the value is what "enabled" means — deliberately NOT an exact match
+            // against the current exe path. After an update or reinstall moves the exe, an exact
+            // comparison would report "disabled" while a stale Run entry still exists (and still
+            // launches, or fails to launch, the old path); reporting it as enabled keeps the
+            // Settings checkbox truthful, and the user toggling it re-runs Enable(), which
+            // rewrites the entry to the current path.
             using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
-            return key?.GetValue(ValueName) is string existing &&
-                   string.Equals(existing, CommandLine, StringComparison.OrdinalIgnoreCase);
+            return key?.GetValue(ValueName) is string;
         }
     }
 

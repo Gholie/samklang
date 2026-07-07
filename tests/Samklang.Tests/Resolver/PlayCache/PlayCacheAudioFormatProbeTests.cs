@@ -88,6 +88,18 @@ public sealed class PlayCacheAudioFormatProbeTests : IDisposable
     private static byte[] BuildMp4aSampleEntry(int sampleRateHz) =>
         BuildBox("mp4a", BuildAudioSampleEntryCommonFields(2, sampleRateHz));
 
+    /// <summary>
+    /// A minimal "drms" (FairPlay-protected AAC) sample entry — the real sample entry type found
+    /// in every cache file on a real Windows install (issue #20). Real entries carry DRM child
+    /// boxes (esds, sinf, uuid, ...) after the common fields, but those aren't read by the probe
+    /// (only the outer AudioSampleEntry common fields are), so this fixture omits them.
+    /// </summary>
+    private static byte[] BuildDrmsSampleEntry(int sampleRateHz) =>
+        BuildBox("drms", BuildAudioSampleEntryCommonFields(2, sampleRateHz));
+
+    private static byte[] BuildEncaSampleEntry(int sampleRateHz) =>
+        BuildBox("enca", BuildAudioSampleEntryCommonFields(2, sampleRateHz));
+
     private static byte[] BuildM4aFile(byte[] sampleEntryBox, string handlerType = "soun")
     {
         var stsd = BuildBox("stsd", new byte[8], sampleEntryBox); // version+flags(4) + entry_count(4)
@@ -127,6 +139,53 @@ public sealed class PlayCacheAudioFormatProbeTests : IDisposable
         Assert.NotNull(result);
         Assert.Equal(48_000, result!.SampleRateHz);
         Assert.Null(result.BitDepth);
+    }
+
+    [Fact]
+    public void Probe_reads_the_sample_rate_from_a_real_world_drms_FairPlay_sample_entry()
+    {
+        // Regression test for issue #20: a real Windows install's cache files all had a "drms"
+        // stsd sample entry, which the probe used to reject outright.
+        var sampleEntry = BuildDrmsSampleEntry(44_100);
+        var path = WriteFile("track.m4p", BuildM4aFile(sampleEntry));
+
+        var result = _probe.Probe(path);
+
+        Assert.NotNull(result);
+        Assert.Equal(44_100, result!.SampleRateHz);
+        // FairPlay-protected AAC is still lossy from a container-header point of view — no PCM
+        // bit depth to report, same as plain mp4a.
+        Assert.Null(result.BitDepth);
+    }
+
+    [Fact]
+    public void Probe_reads_the_sample_rate_from_a_generic_enca_encrypted_sample_entry()
+    {
+        // "enca" is accepted defensively (its real codec is named by a nested sinf/frma box this
+        // probe doesn't read) — unlike "drms" this was NOT observed on real hardware in issue #20,
+        // but falls through the same outer-sample-rate handling as mp4a/drms.
+        var sampleEntry = BuildEncaSampleEntry(48_000);
+        var path = WriteFile("track.m4a", BuildM4aFile(sampleEntry));
+
+        var result = _probe.Probe(path);
+
+        Assert.NotNull(result);
+        Assert.Equal(48_000, result!.SampleRateHz);
+        Assert.Null(result.BitDepth);
+    }
+
+    [Fact]
+    public void Probe_reads_a_m4p_file_the_same_as_an_equivalent_m4a_file()
+    {
+        // .m4p is the real extension for cache files on a real Windows install (issue #20) — the
+        // probe used to return null for it outright regardless of container contents.
+        var sampleEntry = BuildDrmsSampleEntry(44_100);
+        var path = WriteFile("track.m4p", BuildM4aFile(sampleEntry));
+
+        var result = _probe.Probe(path);
+
+        Assert.NotNull(result);
+        Assert.Equal(44_100, result!.SampleRateHz);
     }
 
     [Fact]

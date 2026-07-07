@@ -89,7 +89,14 @@ public sealed partial class HttpAppleMusicCatalogClient(HttpClient httpClient) :
             return null;
         }
 
-        return await httpClient.GetStringAsync(manifestUrl, cancellationToken).ConfigureAwait(false);
+        // The URL comes out of an API response, not our own code — only follow it over HTTPS
+        // (real asset URLs always are); anything else reads as a malformed/tampered payload.
+        if (!Uri.TryCreate(manifestUrl, UriKind.Absolute, out var manifestUri) || manifestUri.Scheme != Uri.UriSchemeHttps)
+        {
+            return null;
+        }
+
+        return await httpClient.GetStringAsync(manifestUri, cancellationToken).ConfigureAwait(false);
     }
 
     private static HttpRequestMessage CreateRequest(HttpMethod method, string url, string token)

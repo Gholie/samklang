@@ -287,6 +287,28 @@ public class TrackSyncCoordinatorTests
     }
 
     [Fact]
+    public void ApplyLateResolution_is_ignored_while_switching_is_paused()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(new FormatResolution(new DeviceFormat(44_100, 24), ResolutionConfidence.Fallback, "Tier fallback"));
+        var deviceController = new FakeDeviceController();
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController, new FakeRestingFormatReverter());
+        var track = new Track("Title", "Artist", "Album");
+        watcher.Fire(track);
+        var appliedBeforePause = deviceController.LastAppliedTarget;
+
+        // The catalog lookup that produces a late resolution can outlive the user pausing
+        // switching — "Pause switching" must suppress the late correction too, not just
+        // track-change-driven switches.
+        coordinator.Pause();
+        var lateResolution = new FormatResolution(new DeviceFormat(96_000, 24), ResolutionConfidence.Exact, "Catalog match");
+        coordinator.ApplyLateResolution(track, lateResolution);
+
+        Assert.NotEqual(lateResolution, coordinator.Resolution);
+        Assert.Equal(appliedBeforePause, deviceController.LastAppliedTarget);
+    }
+
+    [Fact]
     public void ApplyLateResolution_is_ignored_when_there_is_no_current_track()
     {
         var watcher = new FakeTrackWatcher();
@@ -435,5 +457,40 @@ public class TrackSyncCoordinatorTests
         Assert.Equal(1, resolver.CallCount);
         Assert.NotNull(coordinator.AppliedFormat);
         Assert.NotNull(deviceController.LastAppliedTarget);
+    }
+
+    [Fact]
+    public void Resume_reresolves_and_applies_the_track_that_changed_while_paused()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolution = SampleResolution();
+        var resolver = new FakeResolver(resolution);
+        var deviceController = new FakeDeviceController();
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController, new FakeRestingFormatReverter());
+        coordinator.Pause();
+        watcher.Fire(new Track("Title", "Artist", "Album"));
+        Assert.Equal(0, resolver.CallCount);
+
+        coordinator.Resume();
+
+        // Without this, a track that started while paused would keep playing at whatever format
+        // was left applied until the *next* track change.
+        Assert.Equal(1, resolver.CallCount);
+        Assert.Equal(resolution, coordinator.Resolution);
+        Assert.Equal(resolution.Target, deviceController.LastAppliedTarget);
+    }
+
+    [Fact]
+    public void Resume_with_no_current_track_does_not_resolve_anything()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(SampleResolution());
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, new FakeDeviceController(), new FakeRestingFormatReverter());
+        coordinator.Pause();
+
+        coordinator.Resume();
+
+        Assert.Equal(0, resolver.CallCount);
+        Assert.Null(coordinator.Resolution);
     }
 }

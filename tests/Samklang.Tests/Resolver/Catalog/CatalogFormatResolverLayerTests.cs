@@ -181,6 +181,29 @@ public class CatalogFormatResolverLayerTests
     }
 
     [Fact]
+    public void TryResolve_retries_a_track_whose_earlier_lookup_failed_instead_of_caching_the_failure()
+    {
+        var attempts = 0;
+        var client = new FakeCatalogClient
+        {
+            SearchImpl = (_, _, track, _) => ++attempts == 1
+                ? throw new HttpRequestException("transient network error")
+                : Task.FromResult<IReadOnlyList<CatalogSearchCandidate>>(
+                    [new CatalogSearchCandidate("id-1", track.Title, track.Artist, track.Album)]),
+        };
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+        var track = SampleTrack();
+
+        // One network blip must not turn this track into a permanent miss for the session —
+        // replaying it later should hit the catalog again and succeed.
+        Assert.Null(layer.TryResolve(track));
+        var second = layer.TryResolve(track);
+
+        Assert.Equal(2, attempts);
+        Assert.Equal(ResolutionConfidence.Exact, second?.Confidence);
+    }
+
+    [Fact]
     public void TryResolve_returns_null_when_no_catalog_candidate_matches_the_track()
     {
         var client = new FakeCatalogClient

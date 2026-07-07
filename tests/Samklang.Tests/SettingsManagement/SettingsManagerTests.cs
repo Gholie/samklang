@@ -77,33 +77,65 @@ public class SettingsManagerTests
     }
 
     [Fact]
-    public void UpdateRestingFormat_persists_the_change_and_leaves_the_grace_period_untouched()
+    public void UpdateFromSettingsView_persists_every_field_in_a_single_store_write()
     {
         var store = new FakeSettingsStore();
         var manager = new SettingsManager(store);
         manager.LoadOrSeed(new DeviceFormat(44_100, 24));
-        var originalGracePeriod = manager.Current.GracePeriod;
+        var savesAfterSeed = store.SaveCallCount;
+        var newMapping = new TierSampleRateMapping(44_100, 48_000, 88_200, 176_400);
 
-        manager.UpdateRestingFormat(new DeviceFormat(192_000, 24));
+        manager.UpdateFromSettingsView(
+            new DeviceFormat(192_000, 24),
+            TimeSpan.FromSeconds(90),
+            DeviceTargetingMode.Pinned,
+            "device-2",
+            newMapping);
 
         Assert.Equal(new DeviceFormat(192_000, 24), manager.Current.RestingFormat);
-        Assert.Equal(originalGracePeriod, manager.Current.GracePeriod);
+        Assert.Equal(TimeSpan.FromSeconds(90), manager.Current.GracePeriod);
+        Assert.Equal(DeviceTargetingMode.Pinned, manager.Current.DeviceTargetingMode);
+        Assert.Equal("device-2", manager.Current.PinnedDeviceId);
+        Assert.Equal(newMapping, manager.Current.TierSampleRates);
         Assert.Equal(manager.Current, store.Stored);
+        Assert.Equal(savesAfterSeed + 1, store.SaveCallCount);
     }
 
     [Fact]
-    public void UpdateGracePeriod_persists_the_change_and_leaves_the_resting_format_untouched()
+    public void UpdateFromSettingsView_raises_a_single_PropertyChanged_for_Current()
     {
         var store = new FakeSettingsStore();
         var manager = new SettingsManager(store);
         manager.LoadOrSeed(new DeviceFormat(44_100, 24));
-        var originalRestingFormat = manager.Current.RestingFormat;
+        var raisedCount = 0;
+        manager.PropertyChanged += (_, _) => raisedCount++;
 
-        manager.UpdateGracePeriod(TimeSpan.FromSeconds(90));
+        manager.UpdateFromSettingsView(
+            new DeviceFormat(96_000, 24),
+            TimeSpan.FromSeconds(60),
+            DeviceTargetingMode.FollowDefault,
+            pinnedDeviceId: null,
+            TierSampleRateMapping.Default);
 
-        Assert.Equal(TimeSpan.FromSeconds(90), manager.Current.GracePeriod);
-        Assert.Equal(originalRestingFormat, manager.Current.RestingFormat);
-        Assert.Equal(manager.Current, store.Stored);
+        Assert.Equal(1, raisedCount);
+    }
+
+    [Fact]
+    public void UpdateFromSettingsView_leaves_the_storefront_override_untouched()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        manager.UpdateStorefrontOverride("gb");
+
+        manager.UpdateFromSettingsView(
+            new DeviceFormat(96_000, 24),
+            TimeSpan.FromSeconds(60),
+            DeviceTargetingMode.FollowDefault,
+            pinnedDeviceId: null,
+            TierSampleRateMapping.Default);
+
+        Assert.Equal("gb", manager.Current.StorefrontOverride);
     }
 
     [Fact]
@@ -133,62 +165,29 @@ public class SettingsManagerTests
     }
 
     [Fact]
-    public void UpdateDeviceTargeting_to_pinned_persists_the_mode_and_the_pinned_device_id()
+    public void UpdateFromSettingsView_in_follow_default_mode_clears_a_previously_pinned_device_id()
     {
         var store = new FakeSettingsStore();
         var manager = new SettingsManager(store);
         manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        manager.UpdateFromSettingsView(
+            new DeviceFormat(44_100, 24),
+            Settings.DefaultGracePeriod,
+            DeviceTargetingMode.Pinned,
+            "device-2",
+            TierSampleRateMapping.Default);
 
-        manager.UpdateDeviceTargeting(DeviceTargetingMode.Pinned, "device-2");
-
-        Assert.Equal(DeviceTargetingMode.Pinned, manager.Current.DeviceTargetingMode);
-        Assert.Equal("device-2", manager.Current.PinnedDeviceId);
-        Assert.Equal(manager.Current, store.Stored);
-    }
-
-    [Fact]
-    public void UpdateDeviceTargeting_to_follow_default_clears_a_previously_pinned_device_id()
-    {
-        var store = new FakeSettingsStore();
-        var manager = new SettingsManager(store);
-        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
-        manager.UpdateDeviceTargeting(DeviceTargetingMode.Pinned, "device-2");
-
-        manager.UpdateDeviceTargeting(DeviceTargetingMode.FollowDefault, pinnedDeviceId: null);
+        // Passing a pinned id alongside FollowDefault (e.g. a stale picker selection) must not
+        // let it linger in the persisted Settings.
+        manager.UpdateFromSettingsView(
+            new DeviceFormat(44_100, 24),
+            Settings.DefaultGracePeriod,
+            DeviceTargetingMode.FollowDefault,
+            "device-2",
+            TierSampleRateMapping.Default);
 
         Assert.Equal(DeviceTargetingMode.FollowDefault, manager.Current.DeviceTargetingMode);
         Assert.Null(manager.Current.PinnedDeviceId);
-    }
-
-    [Fact]
-    public void UpdateDeviceTargeting_leaves_resting_format_and_grace_period_untouched()
-    {
-        var store = new FakeSettingsStore();
-        var manager = new SettingsManager(store);
-        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
-        var originalRestingFormat = manager.Current.RestingFormat;
-        var originalGracePeriod = manager.Current.GracePeriod;
-
-        manager.UpdateDeviceTargeting(DeviceTargetingMode.Pinned, "device-2");
-
-        Assert.Equal(originalRestingFormat, manager.Current.RestingFormat);
-        Assert.Equal(originalGracePeriod, manager.Current.GracePeriod);
-    }
-
-    [Fact]
-    public void UpdateTierSampleRates_persists_the_change_and_leaves_other_fields_untouched()
-    {
-        var store = new FakeSettingsStore();
-        var manager = new SettingsManager(store);
-        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
-        var originalRestingFormat = manager.Current.RestingFormat;
-        var newMapping = new TierSampleRateMapping(44_100, 48_000, 88_200, 176_400);
-
-        manager.UpdateTierSampleRates(newMapping);
-
-        Assert.Equal(newMapping, manager.Current.TierSampleRates);
-        Assert.Equal(originalRestingFormat, manager.Current.RestingFormat);
-        Assert.Equal(manager.Current, store.Stored);
     }
 
     [Fact]

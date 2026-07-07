@@ -106,9 +106,14 @@ public static class CatalogTrackMatcher
         return builder.ToString().Trim();
     }
 
+    // "live" is deliberately absent: a live recording is a genuinely different variant whose
+    // sample rate can differ from the studio version's, so equating "Song (Live)" with "Song"
+    // risks applying the wrong variant's format at Exact confidence — the one failure mode this
+    // class exists to avoid. Live titles still match when the catalog carries the same live
+    // variant, since both sides then keep the suffix through normalization.
     private static readonly string[] DroppedSuffixMarkers =
     [
-        "feat.", "feat ", "featuring", "remaster", "live", "mono version", "stereo version",
+        "feat.", "feat ", "featuring", "remaster", "mono version", "stereo version",
     ];
 
     private static string StripParentheticalSuffixes(string value)
@@ -130,12 +135,41 @@ public static class CatalogTrackMatcher
             }
 
             var inner = result[(openParenIndex + 1)..closeParenIndex].Trim().ToLowerInvariant();
-            if (!DroppedSuffixMarkers.Any(marker => inner.Contains(marker, StringComparison.Ordinal)))
+            if (!DroppedSuffixMarkers.Any(marker => ContainsMarkerAtWordStart(inner, marker)))
             {
                 return result;
             }
 
             result = (result[..openParenIndex] + result[(closeParenIndex + 1)..]).Trim();
         }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="marker"/> occurs in <paramref name="inner"/> starting at a word
+    /// boundary. A bare <c>Contains</c> would fire on markers buried inside unrelated words —
+    /// e.g. "remaster" inside "(Unremastered)", which names a *different* variant that must not
+    /// be stripped away. Markers matching as a word *prefix* is still intended ("remaster"
+    /// matches "Remastered 2011").
+    /// </summary>
+    private static bool ContainsMarkerAtWordStart(string inner, string marker)
+    {
+        var searchFrom = 0;
+        while (searchFrom <= inner.Length - marker.Length)
+        {
+            var index = inner.IndexOf(marker, searchFrom, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            if (index == 0 || !char.IsLetterOrDigit(inner[index - 1]))
+            {
+                return true;
+            }
+
+            searchFrom = index + 1;
+        }
+
+        return false;
     }
 }

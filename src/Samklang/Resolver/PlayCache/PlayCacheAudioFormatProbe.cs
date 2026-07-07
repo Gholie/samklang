@@ -5,11 +5,12 @@ using System.Text;
 namespace Samklang.Resolver.PlayCache;
 
 /// <summary>
-/// Reads sample rate and bit depth straight out of an audio file's container header for the two
-/// container types the Apple Music Windows app's PlayCache stores — ISO-BMFF <c>.m4a</c>
-/// (AAC/ALAC) and raw <c>.mp3</c> frames — by walking box/frame headers only; no audio sample is
-/// ever decoded. Bit depth is null when the container doesn't expose one (AAC/MP3 are lossy and
-/// carry no PCM bit depth) — only ALAC's magic-cookie config box exposes a real one.
+/// Reads sample rate and bit depth straight out of an audio file's container header for the
+/// container types the Apple Music Windows app's PlayCache stores — ISO-BMFF <c>.m4a</c>/<c>.m4p</c>
+/// (AAC/ALAC, including FairPlay-protected variants — see <see cref="ReadStsdFirstSampleEntry"/>)
+/// and raw <c>.mp3</c> frames — by walking box/frame headers only; no audio sample is ever
+/// decoded. Bit depth is null when the container doesn't expose one (AAC/MP3 are lossy and carry
+/// no PCM bit depth) — only ALAC's magic-cookie config box exposes a real one.
 /// </summary>
 public sealed class PlayCacheAudioFormatProbe : IAudioFileFormatProbe
 {
@@ -23,7 +24,10 @@ public sealed class PlayCacheAudioFormatProbe : IAudioFileFormatProbe
         {
             return Path.GetExtension(filePath).ToLowerInvariant() switch
             {
-                ".m4a" or ".mp4" => ProbeIsoBmff(stream),
+                // .m4p is the real on-disk extension for FairPlay-protected PlayCache entries
+                // (issue #20) — same ISO-BMFF container shape as .m4a, just with a DRM-flavored
+                // stsd sample entry (see ReadStsdFirstSampleEntry).
+                ".m4a" or ".mp4" or ".m4p" => ProbeIsoBmff(stream),
                 ".mp3" => ProbeMp3(stream),
                 _ => null,
             };
@@ -107,7 +111,28 @@ public sealed class PlayCacheAudioFormatProbe : IAudioFileFormatProbe
             return null;
         }
 
-        return header.Type is "mp4a" or "alac" ? new Box(header.Type, header.PayloadStart, header.BoxEnd) : null;
+        // "drms" (FairPlay-protected AAC) is the real sample entry type found in every one of a
+        // real Windows install's .m4p cache entries (issue #20) — confirmed via a hand-rolled
+        // harness against a real file. The box tree there was
+        // moov>trak>mdia>minf>stbl>stsd>'drms'{esds,dmix,udi2,udc2,udex,sbtd,sinf,uuid,free}, and
+        // critically the *outer* AudioSampleEntry common fields this probe reads (channelcount /
+        // samplesize / samplerate — see ParseAudioSampleEntry) sit at the same fixed offsets as
+        // any other sample entry and parsed a real 44100 Hz value even under "drms". Only the
+        // *sample payload* is FairPlay-encrypted; this container-header metadata is not, so
+        // reading it here never touches DRM-protected bytes and never decodes/decrypts audio —
+        // same guarantee as the mp4a/alac paths.
+        //
+        // "enca" (generic encrypted sample entry, ISO/IEC 14496-12) is accepted defensively for
+        // the same reason — its real underlying codec is named by a nested sinf/frma box we don't
+        // read, so it falls through to the same "report the outer sample rate, no bit depth"
+        // handling as mp4a/drms below — but this has NOT been observed on real hardware (the
+        // verified real cache only ever produced "drms" entries), so treat it as an untested,
+        // best-effort extension rather than a confirmed-correct path. A hypothetical "drml"
+        // (encrypted ALAC, for lossless cache entries) is deliberately NOT special-cased here:
+        // issue #20 flagged it as a possibility for lossless entries but the real cache inspected
+        // only contained lossy AAC ("drms") entries, so there's no real evidence for how it's
+        // shaped and inventing ALAC-specific handling for it would be guessing.
+        return header.Type is "mp4a" or "alac" or "drms" or "enca" ? new Box(header.Type, header.PayloadStart, header.BoxEnd) : null;
     }
 
     private static AudioFileFormat? ParseAudioSampleEntry(Stream stream, Box sampleEntry)
@@ -149,7 +174,9 @@ public sealed class PlayCacheAudioFormatProbe : IAudioFileFormatProbe
             return outerSampleRateHz > 0 ? new AudioFileFormat(outerSampleRateHz, null) : null;
         }
 
-        // mp4a (AAC): lossy, no PCM bit depth to report.
+        // mp4a (AAC), drms (FairPlay-protected AAC), and enca (generic encrypted — real codec
+        // named by an unread sinf/frma box) are all lossy from this probe's point of view: no PCM
+        // bit depth to report, just the outer sample-entry rate.
         return outerSampleRateHz > 0 ? new AudioFileFormat(outerSampleRateHz, null) : null;
     }
 

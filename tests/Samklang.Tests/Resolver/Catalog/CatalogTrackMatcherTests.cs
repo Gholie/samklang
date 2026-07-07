@@ -51,6 +51,54 @@ public class CatalogTrackMatcherTests
     }
 
     [Fact]
+    public void FindBestMatch_ignores_a_remaster_suffix_on_the_catalog_title()
+    {
+        var track = new Track("Some Song", "Artist A", "Album");
+        var candidates = new[] { new CatalogSearchCandidate("10", "Some Song (2011 Remastered Version)", "Artist A", "Album") };
+
+        var result = CatalogTrackMatcher.FindBestMatch(track, candidates);
+
+        Assert.Equal("10", result?.Id);
+    }
+
+    [Fact]
+    public void FindBestMatch_does_not_equate_a_live_version_with_the_studio_version()
+    {
+        // A live recording is a different variant whose sample rate can genuinely differ — an
+        // Exact-confidence match against it would apply the wrong variant's format.
+        var track = new Track("Some Song", "Artist A", "Album");
+        var candidates = new[] { new CatalogSearchCandidate("11", "Some Song (Live)", "Artist A", "Live Album") };
+
+        var result = CatalogTrackMatcher.FindBestMatch(track, candidates);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void FindBestMatch_matches_a_live_version_to_the_same_live_version()
+    {
+        var track = new Track("Some Song (Live)", "Artist A", "Live Album");
+        var candidates = new[] { new CatalogSearchCandidate("12", "Some Song (Live)", "Artist A", "Live Album") };
+
+        var result = CatalogTrackMatcher.FindBestMatch(track, candidates);
+
+        Assert.Equal("12", result?.Id);
+    }
+
+    [Fact]
+    public void FindBestMatch_does_not_strip_a_parenthetical_that_only_contains_a_marker_inside_another_word()
+    {
+        // "Unremastered" contains "remaster" but names a different variant; stripping it would
+        // wrongly equate the two titles.
+        var track = new Track("Some Song", "Artist A", "Album");
+        var candidates = new[] { new CatalogSearchCandidate("13", "Some Song (Unremastered)", "Artist A", "Album") };
+
+        var result = CatalogTrackMatcher.FindBestMatch(track, candidates);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
     public void FindBestMatch_returns_null_when_no_candidate_title_matches()
     {
         var track = new Track("Some Song", "Artist A", "Album");
