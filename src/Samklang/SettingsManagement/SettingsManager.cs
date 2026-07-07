@@ -51,18 +51,30 @@ public sealed class SettingsManager(ISettingsStore store) : INotifyPropertyChang
         return Current;
     }
 
-    /// <summary>Updates and persists the Resting Format, e.g. from the settings view.</summary>
-    public void UpdateRestingFormat(DeviceFormat restingFormat)
+    /// <summary>
+    /// Applies the settings view's whole Save — Resting Format, Grace Period, device targeting,
+    /// and tier mappings — as one persisted write and one <see cref="PropertyChanged"/>, instead
+    /// of a disk round trip (and change-notification storm) per field.
+    /// <paramref name="pinnedDeviceId"/> is ignored (and cleared) when
+    /// <paramref name="deviceTargetingMode"/> is <see cref="DeviceTargetingMode.FollowDefault"/>,
+    /// so a stale pinned ID never lingers once the user has switched back to Follow. Fields with
+    /// no settings-view control (the storefront override) are left untouched.
+    /// </summary>
+    public void UpdateFromSettingsView(
+        DeviceFormat restingFormat,
+        TimeSpan gracePeriod,
+        DeviceTargetingMode deviceTargetingMode,
+        string? pinnedDeviceId,
+        TierSampleRateMapping tierSampleRates)
     {
-        Current = Current with { RestingFormat = restingFormat };
-        store.Save(Current);
-        OnPropertyChanged(nameof(Current));
-    }
-
-    /// <summary>Updates and persists the Grace Period, e.g. from the settings view.</summary>
-    public void UpdateGracePeriod(TimeSpan gracePeriod)
-    {
-        Current = Current with { GracePeriod = gracePeriod };
+        Current = Current with
+        {
+            RestingFormat = restingFormat,
+            GracePeriod = gracePeriod,
+            DeviceTargetingMode = deviceTargetingMode,
+            PinnedDeviceId = deviceTargetingMode == DeviceTargetingMode.Pinned ? pinnedDeviceId : null,
+            TierSampleRates = tierSampleRates,
+        };
         store.Save(Current);
         OnPropertyChanged(nameof(Current));
     }
@@ -70,36 +82,12 @@ public sealed class SettingsManager(ISettingsStore store) : INotifyPropertyChang
     /// <summary>
     /// Updates and persists the catalog storefront override (e.g. "gb"), or clears it (null/blank)
     /// to fall back to auto-detecting the storefront from the Windows region. See
-    /// <see cref="Resolver.Catalog.WindowsRegionStorefrontProvider"/>.
+    /// <see cref="Resolver.Catalog.WindowsRegionStorefrontProvider"/>. Not part of
+    /// <see cref="UpdateFromSettingsView"/> because the settings view has no control for it yet.
     /// </summary>
     public void UpdateStorefrontOverride(string? storefrontOverride)
     {
         Current = Current with { StorefrontOverride = string.IsNullOrWhiteSpace(storefrontOverride) ? null : storefrontOverride.Trim() };
-        store.Save(Current);
-        OnPropertyChanged(nameof(Current));
-    }
-
-    /// <summary>Updates and persists the per-Audio-Tier sample-rate mapping, e.g. from the settings view.</summary>
-    public void UpdateTierSampleRates(TierSampleRateMapping tierSampleRates)
-    {
-        Current = Current with { TierSampleRates = tierSampleRates };
-        store.Save(Current);
-        OnPropertyChanged(nameof(Current));
-    }
-
-    /// <summary>
-    /// Updates and persists the device-targeting choice, e.g. from the settings view.
-    /// <paramref name="pinnedDeviceId"/> is ignored (and cleared) when <paramref name="mode"/> is
-    /// <see cref="DeviceTargetingMode.FollowDefault"/>, so a stale pinned ID never lingers once
-    /// the user has switched back to Follow.
-    /// </summary>
-    public void UpdateDeviceTargeting(DeviceTargetingMode mode, string? pinnedDeviceId)
-    {
-        Current = Current with
-        {
-            DeviceTargetingMode = mode,
-            PinnedDeviceId = mode == DeviceTargetingMode.Pinned ? pinnedDeviceId : null,
-        };
         store.Save(Current);
         OnPropertyChanged(nameof(Current));
     }
