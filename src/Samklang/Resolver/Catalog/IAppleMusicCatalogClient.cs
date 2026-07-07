@@ -3,11 +3,11 @@ using Samklang.Domain;
 namespace Samklang.Resolver.Catalog;
 
 /// <summary>
-/// Network seam for the catalog layer's three unofficial calls (docs/adr/0001): scraping the
-/// anonymous web-player token, catalog search, and fetching the enhanced-HLS manifest behind a
-/// matched track's extended asset URLs. Isolated behind this interface so
-/// <see cref="CatalogFormatResolverLayer"/> can be unit-tested with fakes and never needs a live
-/// network call in tests.
+/// Network seam for the catalog layer's unofficial calls (docs/adr/0001): scraping the
+/// anonymous web-player token, catalog search, fetching the enhanced-HLS manifest behind a
+/// matched track's extended asset URLs, and listing a matched track's album for the next-track
+/// prefetch. Isolated behind this interface so <see cref="CatalogFormatResolverLayer"/> can be
+/// unit-tested with fakes and never needs a live network call in tests.
 /// </summary>
 public interface IAppleMusicCatalogClient
 {
@@ -35,6 +35,15 @@ public interface IAppleMusicCatalogClient
     /// track has no enhanced-HLS asset (e.g. lossy-only catalog entry).
     /// </summary>
     Task<string?> FetchEnhancedHlsManifestAsync(
+        string storefront, string catalogTrackId, string token, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Fetches the ordered track list of the album containing the given catalog track, so the
+    /// catalog layer can predict the next Track (SMTC exposes no play queue) and prefetch its
+    /// format. Returns an empty list rather than throwing when the album or its tracks can't be
+    /// determined — prefetching is purely opportunistic.
+    /// </summary>
+    Task<IReadOnlyList<CatalogSearchCandidate>> FetchAlbumTracksAsync(
         string storefront, string catalogTrackId, string token, CancellationToken cancellationToken);
 }
 

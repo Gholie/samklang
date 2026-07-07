@@ -35,6 +35,10 @@ How certain a Format Resolution is: Exact (true rate known), Tier-derived (only 
 **Target Format**:
 The Device Format a Format Resolution decides the device should switch to. Bit depth is pinned to 24-bit when applying: a 16-bit source still targets 24-bit (bit-perfect), and a bit-depth-only difference never triggers a switch — only the sample rate does.
 
+**Next Track Buffer**:
+The catalog layer's one-slot buffer holding the predicted next Track's already-resolved Target Format. SMTC exposes no play queue, so the prediction is album order: after each successful catalog match, the matched song's album track list is fetched and the following track's format is resolved in the background, making the switch at the track boundary instant when the prediction holds.
+_Avoid_: Prefetch cache, queue lookahead
+
 **Resting Format**:
 The user-configured Device Format the tool reverts to once playback has been idle for the Grace Period. Seeded from the device's format when the tool first runs.
 _Avoid_: Default format (ambiguous with Windows' own term)
