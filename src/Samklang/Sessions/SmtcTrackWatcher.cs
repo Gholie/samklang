@@ -16,14 +16,21 @@ namespace Samklang.Sessions;
 /// both the source of track metadata/artwork and the channel for previous/play-pause/next.
 ///
 /// This class is a thin adapter over a live Windows Runtime API and cannot run outside a real
-/// Windows session with SMTC available, so it is not unit-tested directly.
-/// <see cref="AppleMusicSessionFilter"/> — the only decision logic here — is tested in isolation
-/// instead.
+/// Windows session with SMTC available, so it is not unit-tested directly. Its decision logic
+/// lives in classes tested in isolation instead: <see cref="AppleMusicSessionFilter"/> (which
+/// session to attach) and <see cref="StaleRefreshGuard"/> (which of several overlapping refreshes
+/// may publish its results).
 /// </summary>
 public sealed class SmtcTrackWatcher : ITrackWatcher, IMediaTransport, IDisposable
 {
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private GlobalSystemMediaTransportControlsSession? _attachedSession;
+
+    // MediaPropertiesChanged fires several times per track change (Apple Music updates the title
+    // first, the thumbnail a beat later), so RefreshTrackAsync calls overlap. This guard makes the
+    // newest refresh win: an older refresh whose slow thumbnail read finishes late is discarded
+    // instead of overwriting the current track's artwork with the previous track's (issue #30).
+    private readonly StaleRefreshGuard _refreshGuard = new();
 
     public Track? CurrentTrack { get; private set; }
 
@@ -72,8 +79,14 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IMediaTransport, IDisposab
         if (appleMusicSession is null)
         {
             DetachSession();
-            SetCurrentTrack(null);
-            SetArtwork(null);
+
+            // Supersede (not just apply): an in-flight RefreshTrackAsync for the now-dead session
+            // must not resurrect its track/artwork after this clear.
+            _refreshGuard.Supersede(() =>
+            {
+                SetCurrentTrack(null);
+                SetArtwork(null);
+            });
             SetPlaybackState(null);
             return;
         }
@@ -109,21 +122,33 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IMediaTransport, IDisposab
 
     private async Task RefreshTrackAsync(GlobalSystemMediaTransportControlsSession session)
     {
+        var token = _refreshGuard.Begin();
         try
         {
             var properties = await session.TryGetMediaPropertiesAsync();
-            SetCurrentTrack(new Track(
+            var track = new Track(
                 properties.Title ?? string.Empty,
                 properties.Artist ?? string.Empty,
-                properties.AlbumTitle ?? string.Empty));
-            SetArtwork(await TryReadArtworkAsync(properties.Thumbnail));
+                properties.AlbumTitle ?? string.Empty);
+
+            // Apply the track before the (slower) artwork read so downstream consumers — the
+            // format-switching pipeline in particular — react as early as before this guard
+            // existed.
+            _refreshGuard.TryApply(token, () => SetCurrentTrack(track));
+
+            var artwork = await TryReadArtworkAsync(properties.Thumbnail);
+            _refreshGuard.TryApply(token, () => SetArtwork(artwork));
         }
         catch
         {
             // The session can disappear mid-read (app closing, track skip mid-flight); treat it
-            // as "no track" rather than propagating a transient COM failure into the UI.
-            SetCurrentTrack(null);
-            SetArtwork(null);
+            // as "no track" rather than propagating a transient COM failure into the UI — unless
+            // a newer refresh has already taken over, in which case its result stands.
+            _refreshGuard.TryApply(token, () =>
+            {
+                SetCurrentTrack(null);
+                SetArtwork(null);
+            });
         }
     }
 
