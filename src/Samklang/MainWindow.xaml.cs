@@ -29,7 +29,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     // System.Windows.Forms, since it has several types (Application, Timer, ...) that collide
     // with WPF's.
     private readonly System.Windows.Forms.NotifyIcon _notifyIcon;
-    private readonly System.Windows.Forms.ToolStripMenuItem _pauseMenuItem;
 
     // Set only by ExitApplication, right before calling Application.Shutdown(); everywhere else,
     // a window "close" (the X button, Alt+F4, ...) just hides to the tray instead.
@@ -79,7 +78,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _pollTimer.Tick += (_, _) => _coordinator.CheckGracePeriodRevert();
 
-        (_notifyIcon, _pauseMenuItem) = CreateNotifyIcon();
+        _notifyIcon = CreateNotifyIcon();
 
         // MVVM split (issue #9): TrackSyncCoordinator's PropertyChanged already fires off the
         // SMTC/COM thread, so DashboardViewModel is given a UI-thread invoker that marshals its
@@ -168,7 +167,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         System.Windows.Application.Current.Shutdown();
     }
 
-    private (System.Windows.Forms.NotifyIcon, System.Windows.Forms.ToolStripMenuItem) CreateNotifyIcon()
+    private System.Windows.Forms.NotifyIcon CreateNotifyIcon()
     {
         var openItem = new System.Windows.Forms.ToolStripMenuItem("Open Samklang");
         openItem.Click += (_, _) => RestoreFromTray();
@@ -206,7 +205,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         };
         notifyIcon.DoubleClick += (_, _) => RestoreFromTray();
 
-        return (notifyIcon, pauseItem);
+        return notifyIcon;
     }
 
     private static System.Drawing.Icon TryGetAppIcon()

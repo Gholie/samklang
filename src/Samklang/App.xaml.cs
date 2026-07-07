@@ -22,12 +22,18 @@ public partial class App : System.Windows.Application
     private const string ActivateEventName = "Samklang-Activate-3F2504E0-4F89-11D3-9A0C-0305E82C3301";
 
     private Mutex? _instanceMutex;
+    private bool _ownsInstanceMutex;
     private EventWaitHandle? _activateEvent;
     private RegisteredWaitHandle? _activateRegisteredWait;
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // Ownership is only actually acquired when this call *created* the Mutex — opening an
+        // existing one with initiallyOwned: true does not take it. OnExit must know the
+        // difference: releasing a Mutex this instance never owned throws ApplicationException,
+        // which used to crash every second launch on its way out.
         _instanceMutex = new Mutex(initiallyOwned: true, name: MutexName, out var createdNew);
+        _ownsInstanceMutex = createdNew;
         if (!createdNew)
         {
             NotifyRunningInstanceAndExit();
@@ -76,7 +82,11 @@ public partial class App : System.Windows.Application
     {
         _activateRegisteredWait?.Unregister(null);
         _activateEvent?.Dispose();
-        _instanceMutex?.ReleaseMutex();
+        if (_ownsInstanceMutex)
+        {
+            _instanceMutex?.ReleaseMutex();
+        }
+
         _instanceMutex?.Dispose();
         base.OnExit(e);
     }

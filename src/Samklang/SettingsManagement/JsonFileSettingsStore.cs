@@ -52,6 +52,11 @@ public sealed class JsonFileSettingsStore : ISettingsStore
             Directory.CreateDirectory(directory);
         }
 
-        File.WriteAllText(_filePath, JsonSerializer.Serialize(settings, SerializerOptions));
+        // Write-to-temp-then-rename so a crash/power cut mid-write can't leave a half-written
+        // settings.json behind — Load() treats a corrupt file as first run and silently reseeds,
+        // which would throw the user's settings away. The rename is atomic on the same volume.
+        var tempPath = _filePath + ".tmp";
+        File.WriteAllText(tempPath, JsonSerializer.Serialize(settings, SerializerOptions));
+        File.Move(tempPath, _filePath, overwrite: true);
     }
 }
