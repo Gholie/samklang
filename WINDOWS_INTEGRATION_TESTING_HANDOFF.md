@@ -168,9 +168,11 @@ environment can merge a release PR or execute a `windows-latest` GitHub Actions 
 `release-please` watches Conventional Commits on `main` and maintains a "release PR"
 (version bump in `Samklang.csproj` + `CHANGELOG.md`). Merging that PR makes it create
 a *draft* GitHub Release; the same workflow run then builds the Velopack artifacts,
-attests their build provenance, attaches them to the draft, and publishes it. The
-draft stage is what guarantees a release is never publicly visible (including to the
-app's own update check, which ignores drafts) without attested artifacts on it.
+attaches them to the draft, and publishes it. The repository has immutable releases
+enabled, so publishing is the moment GitHub attests every asset and freezes the asset
+list — the draft stage is what guarantees a release is never publicly visible
+(including to the app's own update check, which ignores drafts) until its artifacts
+are complete, and it's also the only point assets *can* be attached at all.
 
 **What a human must verify on a real Windows machine, in order:**
 
@@ -188,8 +190,11 @@ app's own update check, which ignores drafts) without attested artifacts on it.
      `Samklang-win-Setup.exe` or similar — note the exact name and fix the README's
      Install section if it differs) plus `.nupkg`/portable zip attached, and is then
      automatically flipped to published with the `v0.1.0` tag created.
-   - The provenance attestation verifies:
-     `gh attestation verify <downloaded Samklang-win-Setup.exe> --repo Gholie/samklang`.
+   - The automatic release attestation (immutable releases) verifies against a
+     downloaded asset:
+     `gh attestation verify <Samklang-win-Setup.exe> --repo Gholie/samklang --predicate-type https://in-toto.io/attestation/release/v0.1`
+     (if the predicate type differs, `gh attestation verify` without the flag lists
+     what's attached — confirm and correct the README's command if needed).
 2. **Fresh install.** Download the setup exe from that release on a clean (or
    throwaway VM) Windows 11 machine and run it. Confirm:
    - No admin elevation prompt (per-user install).

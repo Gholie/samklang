@@ -12,7 +12,7 @@ Windows resamples every app's audio to the device's shared-mode format (the "Def
 
 ## Install
 
-1. Grab the latest installer from the [Releases page](https://github.com/Gholie/samklang/releases) — download the `*-Setup.exe` asset (`Samklang-win-Setup.exe`) from the newest release. Every release's artifacts carry a [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) you can verify with `gh attestation verify Samklang-win-Setup.exe --repo Gholie/samklang`.
+1. Grab the latest installer from the [Releases page](https://github.com/Gholie/samklang/releases) — download the `*-Setup.exe` asset (`Samklang-win-Setup.exe`) from the newest release. Releases are [immutable](https://docs.github.com/en/repositories/releasing-projects-on-github/immutable-releases) and every asset is attested by GitHub at publish time — verify a download with `gh attestation verify Samklang-win-Setup.exe --repo Gholie/samklang --predicate-type https://in-toto.io/attestation/release/v0.1`.
 2. Run it. There's no install wizard to click through — it installs to your user profile (no admin prompt) and launches Samklang automatically when it's done.
 3. Windows SmartScreen may warn that this is from an "unknown publisher" the first time, since the installer isn't code-signed yet — click **More info → Run anyway** to proceed.
 

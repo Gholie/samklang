@@ -3,10 +3,12 @@ name: Release
 # release-please turns Conventional Commits on main into a release PR (semver bump + changelog);
 # merging that PR makes release-please create a *draft* GitHub Release. The build job below runs
 # in this same workflow run — deliberately, because GitHub does NOT fire `on: release` workflow
-# triggers for draft releases — and builds the Velopack artifacts, attests their build provenance,
-# attaches them to the draft, and only then flips it to published. So a release is never visible
-# (to users, or to the app's own GithubSource update check, which ignores drafts) without attested
-# artifacts already on it.
+# triggers for draft releases — and builds the Velopack artifacts, attaches them to the draft, and
+# only then flips it to published. The draft stage is load-bearing twice over: a release is never
+# visible (to users, or to the app's own GithubSource update check, which ignores drafts) until
+# its artifacts are complete, and this repository has immutable releases enabled — GitHub attests
+# every asset automatically at publish time and no asset can be added or changed afterwards, so
+# attach-then-publish is the only order that works at all.
 on:
   push:
     branches: [main]
@@ -63,8 +65,6 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write # upload assets to the draft Release and publish it
-      id-token: write # prove this workflow's identity to the attestation service (OIDC)
-      attestations: write # store the build-provenance attestation
     env:
       GH_TOKEN: ${{ github.token }}
 
@@ -122,18 +122,6 @@ jobs:
           --mainExe Samklang.exe
           --outputDir Releases
 
-      # Records signed build provenance (who built it, from what commit, with what workflow) for
-      # the artifacts users actually run — verifiable later with
-      # `gh attestation verify <file> --repo <owner/repo>`. This is the reason the Release stays a
-      # draft until now: attestation happens before anything is publicly visible.
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
-        with:
-          subject-path: |
-            Releases/*.exe
-            Releases/*.nupkg
-            Releases/*.zip
-
       # Everything vpk emitted goes onto the Release — the updater (GithubSource) reads the
       # release's assets, so the .nupkg/setup/manifest files must all land there, not just the
       # installer. `gh` resolves draft releases by their tag name even though the git tag itself
@@ -142,6 +130,10 @@ jobs:
         shell: bash
         run: gh release upload "${{ needs.release-please.outputs.tag_name }}" Releases/* --clobber --repo ${{ github.repository }}
 
+      # Publishing creates the git tag and, with immutable releases enabled on this repository,
+      # freezes the asset list and generates GitHub's release attestation for every asset —
+      # verifiable with `gh attestation verify <file> --repo <owner/repo>
+      # --predicate-type https://in-toto.io/attestation/release/v0.1`.
       - name: Publish the release
         shell: bash
         run: gh release edit "${{ needs.release-please.outputs.tag_name }}" --draft=false --repo ${{ github.repository }}
