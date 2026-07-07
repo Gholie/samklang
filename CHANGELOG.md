@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/Gholie/samklang/compare/v1.0.0...v1.1.0) (2026-07-07)
+
+
+### Features
+
+* modern now-playing dashboard with artwork, controls, and simple-UI toggle ([#26](https://github.com/Gholie/samklang/issues/26)) ([fadfa9f](https://github.com/Gholie/samklang/commit/fadfa9ffe5b4b1428a1d9bf7967c5d0f96f146cb))
+* **playback:** Add next-track prefetch buffer for seamless album playback ([#27](https://github.com/Gholie/samklang/issues/27)) ([31b0515](https://github.com/Gholie/samklang/commit/31b0515b8248bc841251527f853cdd041f6feac8))
+
 ## 1.0.0 (2026-07-07)
 
 
