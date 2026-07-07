@@ -26,8 +26,9 @@ public interface IAudioEndpoint
     void SetMuted(string deviceId, bool muted);
 
     /// <summary>
-    /// The sample rates (Hz) the device actually accepts in shared mode at
-    /// <paramref name="bitDepth"/>, probed against the device's mix pipeline rather than assumed.
+    /// The sample rates (Hz) the device's driver actually supports (its Device Format can be
+    /// switched to), probed against the driver rather than assumed; <paramref name="bitDepth"/>
+    /// is a hint used only when the device's configured format can't be read.
     /// Implementations are expected to cache this per device, since probing every candidate rate
     /// is comparatively expensive and a device's capabilities don't change between Track changes.
     /// </summary>

@@ -13,11 +13,17 @@ namespace Samklang.Devices;
 /// the Windows default's ID via NAudio's <c>MMDeviceEnumerator</c>, the two facts device targeting
 /// (<see cref="Domain.DeviceTargetResolver"/>) needs.
 ///
-/// Also probes which sample rates a device supports in shared mode, via WASAPI's
-/// <c>IAudioClient.IsFormatSupported</c> — the standard capability check, distinct from
-/// <c>IPolicyConfig</c>, which only reads/writes the format already in effect. Rate-family
-/// clamping itself (deciding which supported rate to apply) is a pure policy kept out of this
-/// class entirely; see <see cref="Samklang.Domain.RateFamilyClamp"/>.
+/// Also probes which sample rates a device supports, via WASAPI's
+/// <c>IAudioClient.IsFormatSupported</c> in EXCLUSIVE mode — the mode that reflects the driver's
+/// actual capabilities (the Sound control panel's format list). Shared mode is useless for this:
+/// it answers yes only for the format matching the device's current mix format, so a shared-mode
+/// probe merely echoes the rate the device is already set to (verified live: a FiiO K11 at 48 kHz
+/// answered yes to 48 kHz alone in shared mode, and to every rate from 44.1 to 384 kHz in
+/// exclusive mode). Candidates are rate-patched clones of the device's own configured Device
+/// Format (see <see cref="WaveFormatRatePatcher"/>), because drivers reject hand-built layouts
+/// that differ from their exposed ones. Rate-family clamping itself (deciding which supported
+/// rate to apply) is a pure policy kept out of this class entirely; see
+/// <see cref="Samklang.Domain.RateFamilyClamp"/>.
 ///
 /// Not unit-testable in isolation — <see cref="DeviceController"/> carries the testable
 /// switch-or-skip and device-targeting decisions and is exercised against a fake of
@@ -52,8 +58,15 @@ public sealed class PolicyConfigAudioEndpoint : IAudioEndpoint
     public void SetFormat(string deviceId, DeviceFormat format)
     {
         using var device = GetDevice(deviceId);
-        var channels = TryGetChannelCount(device) ?? 2;
-        var waveFormat = new WaveFormat(format.SampleRateHz, format.BitDepth, channels);
+
+        // Preserve the device's configured container layout (extensible header, channel mask,
+        // container/valid bits) and change only the rate — drivers reject hand-built layouts,
+        // and DeviceController's policy never switches for bit depth alone anyway.
+        var current = TryGetDeviceFormat(device.ID);
+        var waveFormat = current is null
+            ? new WaveFormat(format.SampleRateHz, format.BitDepth, TryGetChannelCount(device) ?? 2)
+            : WaveFormatRatePatcher.WithSampleRate(current, format.SampleRateHz);
+
         PolicyConfigInterop.SetDeviceFormat(device.ID, waveFormat);
     }
 
@@ -112,14 +125,17 @@ public sealed class PolicyConfigAudioEndpoint : IAudioEndpoint
     private static IReadOnlySet<int> ProbeSupportedSampleRates(MMDevice device, int bitDepth)
     {
         var channels = TryGetChannelCount(device) ?? 2;
+        var deviceFormat = TryGetDeviceFormat(device.ID);
         var supported = new HashSet<int>();
 
         foreach (var rateHz in CandidateSampleRatesHz)
         {
             try
             {
-                var candidate = new WaveFormat(rateHz, bitDepth, channels);
-                if (device.AudioClient.IsFormatSupported(AudioClientShareMode.Shared, candidate))
+                var candidate = deviceFormat is null
+                    ? new WaveFormat(rateHz, bitDepth, channels)
+                    : WaveFormatRatePatcher.WithSampleRate(deviceFormat, rateHz);
+                if (device.AudioClient.IsFormatSupported(AudioClientShareMode.Exclusive, candidate))
                 {
                     supported.Add(rateHz);
                 }
@@ -131,7 +147,26 @@ public sealed class PolicyConfigAudioEndpoint : IAudioEndpoint
             }
         }
 
+        // The configured format's own rate works by definition. This also keeps the set
+        // non-degenerate for virtual devices whose drivers reject exclusive mode outright.
+        if (deviceFormat is not null)
+        {
+            supported.Add(deviceFormat.SampleRate);
+        }
+
         return supported;
+    }
+
+    private static WaveFormat? TryGetDeviceFormat(string deviceId)
+    {
+        try
+        {
+            return PolicyConfigInterop.GetDeviceFormat(deviceId);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static MMDevice GetDevice(string deviceId)
