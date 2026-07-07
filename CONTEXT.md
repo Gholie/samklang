@@ -33,7 +33,7 @@ The chain that performs Format Resolution: catalog match → local cache analysi
 How certain a Format Resolution is: Exact (true rate known), Tier-derived (only the Audio Tier is known; rate comes from user's per-tier mapping), Fallback (nothing known; default applies).
 
 **Target Format**:
-The Device Format a Format Resolution decides the device should switch to.
+The Device Format a Format Resolution decides the device should switch to. Bit depth is pinned to 24-bit when applying: a 16-bit source still targets 24-bit (bit-perfect), and a bit-depth-only difference never triggers a switch — only the sample rate does.
 
 **Resting Format**:
 The user-configured Device Format the tool reverts to once playback has been idle for the Grace Period. Seeded from the device's format when the tool first runs.

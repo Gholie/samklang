@@ -83,6 +83,21 @@ public class DeviceControllerTests
     }
 
     [Fact]
+    public void ApplyTargetFormat_skips_the_switch_when_only_the_bit_depth_differs()
+    {
+        // The user's device sits at 16-bit but the pinned target is 24-bit at the same rate.
+        // Bit depth alone is never worth the audible mute/switch interruption (24-bit playback
+        // of 16-bit content is bit-perfect), so nothing must be swapped.
+        var endpoint = new FakeAudioEndpoint { Current = new DeviceFormat(48_000, 16) };
+        var controller = new DeviceController(endpoint);
+
+        var switched = controller.ApplyTargetFormat(new DeviceFormat(48_000, 24));
+
+        Assert.False(switched);
+        Assert.DoesNotContain(endpoint.Calls, call => call is "mute" or "unmute" || call.StartsWith("set:"));
+    }
+
+    [Fact]
     public void ApplyTargetFormat_mutes_switches_and_unmutes_in_order_when_the_format_differs()
     {
         var endpoint = new FakeAudioEndpoint { Current = new DeviceFormat(48_000, 16) };

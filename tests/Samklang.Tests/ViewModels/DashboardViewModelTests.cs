@@ -156,6 +156,20 @@ public class DashboardViewModelTests
     }
 
     [Fact]
+    public void Bit_depth_pinning_alone_does_not_show_the_clamped_format_warning()
+    {
+        // A 16-bit source is applied at the pinned 24-bit depth by design — that intentional
+        // pinning must not read as "device doesn't support 16-bit/44.1 kHz".
+        var resolution = new FormatResolution(new DeviceFormat(44_100, 16), ResolutionConfidence.Exact, "PlayCache", IsLossless: true);
+        var (viewModel, watcher, _, _) = CreateSut(resolution);
+
+        watcher.Fire(new Track("Title", "Artist", "Album"));
+
+        Assert.False(viewModel.HasClampedFormat);
+        Assert.Equal(string.Empty, viewModel.ClampedFormatDisplay);
+    }
+
+    [Fact]
     public void Device_target_fallback_shows_a_warning_message()
     {
         var watcher = new FakeTrackWatcher();

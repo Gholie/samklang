@@ -58,9 +58,13 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
     public FormatResolution? Resolution { get; private set; }
 
     /// <summary>
-    /// The Target Format actually applied to the device for the current Track, after rate-family
-    /// clamping — or null before the first Track. Equal to <c>Resolution.Target</c> unless the
-    /// device didn't support the requested rate, in which case the UI should show both.
+    /// The Target Format actually applied to the device for the current Track, after bit-depth
+    /// pinning and rate-family clamping — or null before the first Track. Its bit depth is always
+    /// <see cref="FallbackFormatResolverLayer.PinnedBitDepth"/> (a resolver layer that read a real
+    /// 16-bit source keeps 16 in <c>Resolution.Target</c> for display, but 24-bit playback of
+    /// 16-bit content is bit-perfect, so the device is never switched below 24). Its rate equals
+    /// <c>Resolution.Target</c>'s unless the device didn't support it, in which case the UI
+    /// should show both.
     /// </summary>
     public DeviceFormat? AppliedFormat { get; private set; }
 
@@ -225,8 +229,14 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
         Resolution = resolution;
         OnPropertyChanged(nameof(Resolution));
 
-        var supportedSampleRates = _deviceController.GetSupportedSampleRates(resolution.Target.BitDepth);
-        AppliedFormat = RateFamilyClamp.Clamp(resolution.Target, supportedSampleRates);
+        // 16-bit sources are deliberately ignored for device switching: the device target is
+        // always 24-bit (24-bit playback of 16-bit content is bit-perfect), so only the sample
+        // rate ever drives a switch. Resolution.Target above keeps the source's true bit depth
+        // for display.
+        var target = resolution.Target with { BitDepth = FallbackFormatResolverLayer.PinnedBitDepth };
+
+        var supportedSampleRates = _deviceController.GetSupportedSampleRates(target.BitDepth);
+        AppliedFormat = RateFamilyClamp.Clamp(target, supportedSampleRates);
         OnPropertyChanged(nameof(AppliedFormat));
 
         _deviceController.ApplyTargetFormat(AppliedFormat.Value);
