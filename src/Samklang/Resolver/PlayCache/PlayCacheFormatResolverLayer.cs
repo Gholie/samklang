@@ -39,7 +39,9 @@ namespace Samklang.Resolver.PlayCache;
 /// </summary>
 public sealed class PlayCacheFormatResolverLayer : IFormatResolverLayer
 {
-    private static readonly string[] CandidateExtensions = [".mp3", ".m4a"];
+    // .m4p is the real extension for FairPlay-protected cache files on a real Windows install
+    // (issue #20) — .m4a/.mp3 alone never matched anything real.
+    private static readonly string[] CandidateExtensions = [".mp3", ".m4a", ".m4p"];
 
     /// <summary>A cache file written within this window of a <see cref="TryResolve"/> call counts as the current Track's own (re)download completing.</summary>
     public static readonly TimeSpan FreshWriteSlack = TimeSpan.FromSeconds(15);
