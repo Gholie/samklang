@@ -92,6 +92,19 @@ public sealed class SettingsManager(ISettingsStore store) : INotifyPropertyChang
         OnPropertyChanged(nameof(Current));
     }
 
+    /// <summary>
+    /// Updates and persists the rich now-playing toggle (see <see cref="Settings.RichNowPlaying"/>).
+    /// Not part of <see cref="UpdateFromSettingsView"/> because — like Start-with-Windows — the
+    /// checkbox applies immediately rather than waiting for the Save button, so the dashboard
+    /// flips between rich and simple the moment it's clicked.
+    /// </summary>
+    public void UpdateRichNowPlaying(bool enabled)
+    {
+        Current = Current with { RichNowPlaying = enabled };
+        store.Save(Current);
+        OnPropertyChanged(nameof(Current));
+    }
+
     private void OnPropertyChanged(string propertyName) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

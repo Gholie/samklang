@@ -2,21 +2,27 @@
                  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 xmlns:local="clr-namespace:Samklang"
                  Title="Samklang"
-                 Width="640" Height="640"
-                 MinWidth="480" MinHeight="420"
+                 Width="680" Height="720"
+                 MinWidth="520" MinHeight="480"
                  WindowStartupLocation="CenterScreen"
                  Loaded="Window_Loaded"
                  Closing="Window_Closing"
                  Closed="Window_Closed">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <local:ArtworkImageConverter x:Key="ArtworkToImage" />
     </Window.Resources>
 
     <TabControl Margin="16">
-        <!-- Now-playing panel + recent-switch history (issue #9). -->
+        <!-- Now-playing panel + recent-switch history (issue #9). The now-playing presentation
+             has two modes behind Settings.RichNowPlaying: a rich hero card (album artwork,
+             transport controls, playing animation — NowPlayingViewModel) or a plain text line,
+             for users who want a very simple UI. Everything below the now-playing area (stats,
+             warnings, history) is shared by both modes. -->
         <TabItem Header="Dashboard">
-            <Grid DataContext="{Binding Dashboard}" Margin="16">
+            <Grid Margin="16">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -24,58 +30,305 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="12" />
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
-                    <TextBlock Text="Track: " FontWeight="Bold" />
-                    <TextBlock Text="{Binding TrackDisplay}" TextWrapping="Wrap" />
+                <!-- Rich now-playing hero card. -->
+                <Border Grid.Row="0"
+                        DataContext="{Binding NowPlaying}"
+                        Visibility="{Binding IsRichView, Converter={StaticResource BoolToVis}}"
+                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Album artwork, with a music-note placeholder that shows through
+                             whenever there is no artwork to paint over it. -->
+                        <Border Grid.Column="0" Grid.RowSpan="2"
+                                Width="108" Height="108" Margin="0,0,16,0"
+                                VerticalAlignment="Center">
+                            <Grid>
+                                <Border CornerRadius="6" Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                                    <ui:SymbolIcon Symbol="MusicNote224" FontSize="42"
+                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                </Border>
+                                <Border CornerRadius="6">
+                                    <Border.Background>
+                                        <ImageBrush ImageSource="{Binding ArtworkBytes, Converter={StaticResource ArtworkToImage}}"
+                                                    Stretch="UniformToFill" />
+                                    </Border.Background>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- Track text + tier badge. -->
+                        <StackPanel Grid.Column="1" Grid.Row="0" VerticalAlignment="Center" Margin="0,0,12,8">
+                            <TextBlock Text="{Binding Title}" FontSize="20" FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding Artist}" FontSize="14"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                            <TextBlock Text="{Binding Album}" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                            <Border Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                    CornerRadius="10" Padding="10,3" Margin="0,8,0,0" HorizontalAlignment="Left">
+                                <TextBlock Text="{Binding DataContext.Dashboard.AudioTierDisplay, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                           Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
+                                           FontSize="12" FontWeight="Medium" />
+                            </Border>
+                        </StackPanel>
+
+                        <!-- Transport controls (SMTC previous / play-pause / next). -->
+                        <StackPanel Grid.Column="1" Grid.Row="1" Orientation="Horizontal">
+                            <ui:Button Icon="{ui:SymbolIcon Previous24}" Command="{Binding PreviousCommand}"
+                                       IsEnabled="{Binding HasTrack}" ToolTip="Previous track"
+                                       Width="40" Height="40" CornerRadius="20" Padding="0" />
+                            <ui:Button Command="{Binding PlayPauseCommand}" Appearance="Primary"
+                                       IsEnabled="{Binding HasTrack}" ToolTip="Play / pause"
+                                       Width="48" Height="48" CornerRadius="24" Padding="0" Margin="10,0">
+                                <ui:SymbolIcon FontSize="20">
+                                    <ui:SymbolIcon.Style>
+                                        <Style TargetType="ui:SymbolIcon">
+                                            <Setter Property="Symbol" Value="Play24" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                    <Setter Property="Symbol" Value="Pause24" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ui:SymbolIcon.Style>
+                                </ui:SymbolIcon>
+                            </ui:Button>
+                            <ui:Button Icon="{ui:SymbolIcon Next24}" Command="{Binding NextCommand}"
+                                       IsEnabled="{Binding HasTrack}" ToolTip="Next track"
+                                       Width="40" Height="40" CornerRadius="20" Padding="0" />
+                        </StackPanel>
+
+                        <!-- Equalizer-style playing animation: five accent bars that bounce while
+                             IsPlaying and settle low when idle. Purely decorative — the staggered
+                             durations are what make them look independent. Each bar carries its
+                             own inline ScaleTransform (not a style setter): WPF freezes Freezables
+                             shared through style setters, and a frozen transform can't be
+                             animated. -->
+                        <StackPanel Grid.Column="2" Grid.RowSpan="2" Orientation="Horizontal"
+                                    VerticalAlignment="Center" Margin="8,0,4,0">
+                            <StackPanel.Resources>
+                                <Style TargetType="Rectangle">
+                                    <Setter Property="Width" Value="5" />
+                                    <Setter Property="Height" Value="36" />
+                                    <Setter Property="RadiusX" Value="2.5" />
+                                    <Setter Property="RadiusY" Value="2.5" />
+                                    <Setter Property="Margin" Value="2.5,0" />
+                                    <Setter Property="VerticalAlignment" Value="Bottom" />
+                                    <Setter Property="Fill" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                    <Setter Property="RenderTransformOrigin" Value="0.5,1" />
+                                </Style>
+                            </StackPanel.Resources>
+                            <Rectangle>
+                                <Rectangle.RenderTransform>
+                                    <ScaleTransform ScaleY="0.25" />
+                                </Rectangle.RenderTransform>
+                                <Rectangle.Style>
+                                    <Style TargetType="Rectangle" BasedOn="{StaticResource {x:Type Rectangle}}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                <DataTrigger.EnterActions>
+                                                    <BeginStoryboard Name="EqBar1">
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                                             From="0.2" To="1.0" Duration="0:0:0.62"
+                                                                             AutoReverse="True" RepeatBehavior="Forever" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.EnterActions>
+                                                <DataTrigger.ExitActions>
+                                                    <StopStoryboard BeginStoryboardName="EqBar1" />
+                                                </DataTrigger.ExitActions>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Rectangle.Style>
+                            </Rectangle>
+                            <Rectangle>
+                                <Rectangle.RenderTransform>
+                                    <ScaleTransform ScaleY="0.25" />
+                                </Rectangle.RenderTransform>
+                                <Rectangle.Style>
+                                    <Style TargetType="Rectangle" BasedOn="{StaticResource {x:Type Rectangle}}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                <DataTrigger.EnterActions>
+                                                    <BeginStoryboard Name="EqBar2">
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                                             From="0.55" To="0.9" Duration="0:0:0.48"
+                                                                             AutoReverse="True" RepeatBehavior="Forever" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.EnterActions>
+                                                <DataTrigger.ExitActions>
+                                                    <StopStoryboard BeginStoryboardName="EqBar2" />
+                                                </DataTrigger.ExitActions>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Rectangle.Style>
+                            </Rectangle>
+                            <Rectangle>
+                                <Rectangle.RenderTransform>
+                                    <ScaleTransform ScaleY="0.25" />
+                                </Rectangle.RenderTransform>
+                                <Rectangle.Style>
+                                    <Style TargetType="Rectangle" BasedOn="{StaticResource {x:Type Rectangle}}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                <DataTrigger.EnterActions>
+                                                    <BeginStoryboard Name="EqBar3">
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                                             From="0.15" To="0.95" Duration="0:0:0.74"
+                                                                             AutoReverse="True" RepeatBehavior="Forever" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.EnterActions>
+                                                <DataTrigger.ExitActions>
+                                                    <StopStoryboard BeginStoryboardName="EqBar3" />
+                                                </DataTrigger.ExitActions>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Rectangle.Style>
+                            </Rectangle>
+                            <Rectangle>
+                                <Rectangle.RenderTransform>
+                                    <ScaleTransform ScaleY="0.25" />
+                                </Rectangle.RenderTransform>
+                                <Rectangle.Style>
+                                    <Style TargetType="Rectangle" BasedOn="{StaticResource {x:Type Rectangle}}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                <DataTrigger.EnterActions>
+                                                    <BeginStoryboard Name="EqBar4">
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                                             From="0.45" To="1.0" Duration="0:0:0.55"
+                                                                             AutoReverse="True" RepeatBehavior="Forever" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.EnterActions>
+                                                <DataTrigger.ExitActions>
+                                                    <StopStoryboard BeginStoryboardName="EqBar4" />
+                                                </DataTrigger.ExitActions>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Rectangle.Style>
+                            </Rectangle>
+                            <Rectangle>
+                                <Rectangle.RenderTransform>
+                                    <ScaleTransform ScaleY="0.25" />
+                                </Rectangle.RenderTransform>
+                                <Rectangle.Style>
+                                    <Style TargetType="Rectangle" BasedOn="{StaticResource {x:Type Rectangle}}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                <DataTrigger.EnterActions>
+                                                    <BeginStoryboard Name="EqBar5">
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                                             From="0.3" To="0.85" Duration="0:0:0.68"
+                                                                             AutoReverse="True" RepeatBehavior="Forever" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.EnterActions>
+                                                <DataTrigger.ExitActions>
+                                                    <StopStoryboard BeginStoryboardName="EqBar5" />
+                                                </DataTrigger.ExitActions>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Rectangle.Style>
+                            </Rectangle>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Simple now-playing line — the pre-toggle presentation, for users who turned
+                     the rich card off in Settings. -->
+                <StackPanel Grid.Row="1" Margin="0,0,0,12"
+                            Visibility="{Binding NowPlaying.IsSimpleView, Converter={StaticResource BoolToVis}}">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="Track: " FontWeight="Bold" />
+                        <TextBlock Text="{Binding Dashboard.TrackDisplay}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Audio Tier: " FontWeight="Bold" VerticalAlignment="Center" />
+                        <Border Background="{DynamicResource AccentFillColorDefaultBrush}" CornerRadius="10" Padding="10,2">
+                            <TextBlock Text="{Binding Dashboard.AudioTierDisplay}"
+                                       Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}" FontSize="12" />
+                        </Border>
+                    </StackPanel>
                 </StackPanel>
 
-                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
-                    <TextBlock Text="Audio Tier: " FontWeight="Bold" />
-                    <Border Background="#3350C8" CornerRadius="4" Padding="8,2">
-                        <TextBlock Text="{Binding AudioTierDisplay}" Foreground="White" FontSize="12" />
-                    </Border>
-                </StackPanel>
+                <!-- Format stats, shared by both modes. -->
+                <Border Grid.Row="2"
+                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16,12" Margin="0,0,0,12">
+                    <WrapPanel>
+                        <StackPanel Margin="0,0,32,0">
+                            <TextBlock Text="Target format" FontSize="11"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <TextBlock Text="{Binding Dashboard.TargetFormatDisplay}"
+                                       FontSize="14" FontWeight="SemiBold" Margin="0,2,0,0" />
+                        </StackPanel>
+                        <StackPanel Margin="0,0,32,0">
+                            <TextBlock Text="Device format" FontSize="11"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <TextBlock Text="{Binding Dashboard.DeviceFormatDisplay}"
+                                       FontSize="14" FontWeight="SemiBold" Margin="0,2,0,0" />
+                        </StackPanel>
+                        <StackPanel Margin="0,0,32,0">
+                            <TextBlock Text="Confidence" FontSize="11"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                <TextBlock Text="{Binding Dashboard.ConfidenceDisplay}" FontSize="14" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Dashboard.SourceLayerDisplay}" FontSize="14"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="6,0,0,0" />
+                            </StackPanel>
+                        </StackPanel>
+                        <StackPanel Visibility="{Binding Dashboard.HasClampedFormat, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="Clamped to" FontSize="11"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <TextBlock Text="{Binding Dashboard.ClampedFormatDisplay}" FontSize="14"
+                                       FontWeight="SemiBold" Foreground="DarkOrange"
+                                       TextWrapping="Wrap" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </WrapPanel>
+                </Border>
 
-                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
-                    <TextBlock Text="Target format: " FontWeight="Bold" />
-                    <TextBlock Text="{Binding TargetFormatDisplay}" />
-                </StackPanel>
+                <ui:InfoBar Grid.Row="3" Severity="Warning" IsClosable="False" Margin="0,0,0,12"
+                            IsOpen="{Binding Dashboard.HasDeviceTargetWarning, Mode=OneWay}"
+                            Message="{Binding Dashboard.DeviceTargetWarningMessage}" />
 
-                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,10"
-                            Visibility="{Binding HasClampedFormat, Converter={StaticResource BoolToVis}}">
-                    <TextBlock Text="Clamped to: " FontWeight="Bold" />
-                    <TextBlock Text="{Binding ClampedFormatDisplay}" TextWrapping="Wrap" />
-                </StackPanel>
+                <ui:InfoBar Grid.Row="4" Severity="Informational" IsClosable="False" Margin="0,0,0,12"
+                            IsOpen="{Binding Dashboard.IsPaused, Mode=OneWay}"
+                            Title="Switching paused"
+                            Message="Formats won't change until you resume from the tray menu." />
 
-                <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,0,0,10">
-                    <TextBlock Text="Confidence: " FontWeight="Bold" />
-                    <TextBlock Text="{Binding ConfidenceDisplay}" />
-                    <TextBlock Text=" (" />
-                    <TextBlock Text="{Binding SourceLayerDisplay}" />
-                    <TextBlock Text=")" />
-                </StackPanel>
+                <TextBlock Grid.Row="5" Text="Recent switches" FontWeight="SemiBold" Margin="0,0,0,8" />
 
-                <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,0,0,10">
-                    <TextBlock Text="Device format: " FontWeight="Bold" />
-                    <TextBlock Text="{Binding DeviceFormatDisplay}" />
-                </StackPanel>
-
-                <TextBlock Grid.Row="6" Text="{Binding DeviceTargetWarningMessage}" Foreground="DarkOrange" TextWrapping="Wrap"
-                           Margin="0,0,0,10" Visibility="{Binding HasDeviceTargetWarning, Converter={StaticResource BoolToVis}}" />
-
-                <TextBlock Grid.Row="7" Text="Switching paused" Foreground="DarkOrange" FontWeight="Bold"
-                           Margin="0,0,0,10" Visibility="{Binding IsPaused, Converter={StaticResource BoolToVis}}" />
-
-                <TextBlock Grid.Row="9" Text="Recent switches" FontWeight="Bold" Margin="0,0,0,8" />
-
-                <ListView Grid.Row="10" ItemsSource="{Binding History}">
+                <ListView Grid.Row="6" ItemsSource="{Binding Dashboard.History}" BorderThickness="0">
                     <ListView.View>
                         <GridView>
                             <GridViewColumn Header="Time" DisplayMemberBinding="{Binding TimestampDisplay}" Width="70" />
@@ -144,6 +397,16 @@
                             <TextBlock Text="Dolby Atmos:" Width="160" VerticalAlignment="Center" />
                             <TextBox Text="{Binding DolbyAtmosHzText, UpdateSourceTrigger=PropertyChanged}" Width="90" />
                         </StackPanel>
+                    </StackPanel>
+
+                    <TextBlock Text="Now Playing" FontWeight="Bold" Margin="0,0,0,8" />
+                    <StackPanel Margin="0,0,0,16">
+                        <!-- Applies immediately (no Save needed), like Start with Windows. -->
+                        <CheckBox Content="Rich now-playing view (album artwork, playback controls, animation)"
+                                  IsChecked="{Binding RichNowPlayingEnabled}" />
+                        <TextBlock Text="Turn off for a simple text-only dashboard."
+                                   FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   TextWrapping="Wrap" Margin="28,2,0,0" />
                     </StackPanel>
 
                     <TextBlock Text="Startup" FontWeight="Bold" Margin="0,0,0,8" />

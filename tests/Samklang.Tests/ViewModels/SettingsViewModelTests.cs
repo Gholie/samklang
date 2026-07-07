@@ -219,6 +219,39 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public void Construction_loads_the_rich_now_playing_toggle_from_settings()
+    {
+        var settings = new Settings(
+            new DeviceFormat(44_100, 24),
+            Settings.DefaultGracePeriod,
+            DeviceTargetingMode.FollowDefault,
+            PinnedDeviceId: null,
+            RichNowPlaying: false);
+        var settingsManager = CreateSettingsManager(settings);
+
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+
+        Assert.False(viewModel.RichNowPlayingEnabled);
+        // Loading must not itself write the toggle back through the manager.
+        Assert.False(settingsManager.Current.RichNowPlaying);
+    }
+
+    [Fact]
+    public void Toggling_rich_now_playing_persists_immediately_without_the_save_command()
+    {
+        var settingsManager = CreateSettingsManager();
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+
+        viewModel.RichNowPlayingEnabled = false;
+
+        Assert.False(settingsManager.Current.RichNowPlaying);
+
+        viewModel.RichNowPlayingEnabled = true;
+
+        Assert.True(settingsManager.Current.RichNowPlaying);
+    }
+
+    [Fact]
     public void RefreshDevices_repopulates_available_devices_and_preserves_the_current_selection()
     {
         var settingsManager = CreateSettingsManager();

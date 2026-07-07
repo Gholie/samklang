@@ -211,6 +211,51 @@ public class SettingsManagerTests
     }
 
     [Fact]
+    public void UpdateRichNowPlaying_persists_the_toggle_and_raises_PropertyChanged()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        var raisedCount = 0;
+        manager.PropertyChanged += (_, _) => raisedCount++;
+
+        manager.UpdateRichNowPlaying(false);
+
+        Assert.False(manager.Current.RichNowPlaying);
+        Assert.Equal(manager.Current, store.Stored);
+        Assert.Equal(1, raisedCount);
+    }
+
+    [Fact]
+    public void UpdateFromSettingsView_leaves_the_rich_now_playing_toggle_untouched()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        manager.UpdateRichNowPlaying(false);
+
+        manager.UpdateFromSettingsView(
+            new DeviceFormat(96_000, 24),
+            TimeSpan.FromSeconds(60),
+            DeviceTargetingMode.FollowDefault,
+            pinnedDeviceId: null,
+            TierSampleRateMapping.Default);
+
+        Assert.False(manager.Current.RichNowPlaying);
+    }
+
+    [Fact]
+    public void LoadOrSeed_with_no_persisted_settings_seeds_rich_now_playing_on()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+
+        var settings = manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+
+        Assert.True(settings.RichNowPlaying);
+    }
+
+    [Fact]
     public void Settings_round_trips_through_System_Text_Json()
     {
         var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30), DeviceTargetingMode.Pinned, "device-2");
@@ -258,5 +303,34 @@ public class SettingsManagerTests
 
         Assert.Null(roundTripped!.TierSampleRates);
         Assert.Equal(TierSampleRateMapping.Default, roundTripped.EffectiveTierSampleRates);
+    }
+
+    [Fact]
+    public void Settings_round_trips_a_disabled_rich_now_playing_through_System_Text_Json()
+    {
+        var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30), DeviceTargetingMode.FollowDefault, PinnedDeviceId: null, RichNowPlaying: false);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(settings);
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<Settings>(json);
+
+        Assert.Equal(settings, roundTripped);
+        Assert.False(roundTripped!.RichNowPlaying);
+    }
+
+    /// <summary>
+    /// Back-compat: a settings.json persisted before the RichNowPlaying property shipped has no
+    /// such JSON property — it must deserialize to the toggle's default (on), not to bool's
+    /// default (off), or existing users would silently get the simple UI after updating.
+    /// </summary>
+    [Fact]
+    public void Settings_json_without_a_rich_now_playing_property_deserializes_with_the_toggle_on()
+    {
+        var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30), DeviceTargetingMode.FollowDefault, PinnedDeviceId: null);
+        var node = System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(settings))!.AsObject();
+        node.Remove(nameof(Settings.RichNowPlaying));
+
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<Settings>(node.ToJsonString());
+
+        Assert.True(roundTripped!.RichNowPlaying);
     }
 }
