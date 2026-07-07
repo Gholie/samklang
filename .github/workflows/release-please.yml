@@ -11,10 +11,6 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write # create/update the release PR's branch and the draft Release
-  pull-requests: write # open/update the release PR itself
-
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false # never cancel a release partway through publishing assets
@@ -30,14 +26,32 @@ env:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    # release-please acts entirely through the minted app token below, so the job's own
+    # GITHUB_TOKEN needs no write access at all.
+    permissions:
+      contents: read
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
       version: ${{ steps.release.outputs.version }}
     steps:
+      # release-please runs with a GitHub App installation token instead of the default
+      # GITHUB_TOKEN, because events created *by* GITHUB_TOKEN never trigger other workflows —
+      # with it, the release PRs release-please opens would get no ci.yml run. The app token has
+      # no such restriction, so release PRs are CI-gated like any other PR. The `app-id` input
+      # accepts the app's client ID.
+      - name: Mint release app token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_KEY }}
+
       - name: Run release-please
         id: release
         uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
 
   # Only runs on the push that merged a release PR (release_created), i.e. once per release.
   # Note: because the release PR is created with the default GITHUB_TOKEN, ci.yml does not run on
