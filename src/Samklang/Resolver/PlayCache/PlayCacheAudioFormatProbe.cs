@@ -123,15 +123,13 @@ public sealed class PlayCacheAudioFormatProbe : IAudioFileFormatProbe
         // same guarantee as the mp4a/alac paths.
         //
         // "enca" (generic encrypted sample entry, ISO/IEC 14496-12) is accepted defensively for
-        // the same reason — its real underlying codec is named by a nested sinf/frma box we don't
-        // read, so it falls through to the same "report the outer sample rate, no bit depth"
-        // handling as mp4a/drms below — but this has NOT been observed on real hardware (the
-        // verified real cache only ever produced "drms" entries), so treat it as an untested,
-        // best-effort extension rather than a confirmed-correct path. A hypothetical "drml"
-        // (encrypted ALAC, for lossless cache entries) is deliberately NOT special-cased here:
-        // issue #20 flagged it as a possibility for lossless entries but the real cache inspected
-        // only contained lossy AAC ("drms") entries, so there's no real evidence for how it's
-        // shaped and inventing ALAC-specific handling for it would be guessing.
+        // the same reason — but this has NOT been observed on real hardware (the verified real
+        // cache only ever produced "drms" entries), so treat it as an untested, best-effort
+        // extension rather than a confirmed-correct path. For both encrypted entry types the real
+        // underlying codec is recovered from the nested sinf/frma box (see ParseAudioSampleEntry):
+        // a frma naming "alac" gets the full ALAC magic-cookie treatment (real bit depth/rate),
+        // anything else falls through to the lossy "outer sample rate, no bit depth" handling —
+        // the verified real cache's "drms" entries all wrapped lossy AAC.
         return header.Type is "mp4a" or "alac" or "drms" or "enca" ? new Box(header.Type, header.PayloadStart, header.BoxEnd) : null;
     }
 
@@ -156,17 +154,26 @@ public sealed class PlayCacheAudioFormatProbe : IAudioFileFormatProbe
 
         var outerSampleRateHz = (int)(BinaryPrimitives.ReadUInt32BigEndian(rateBuffer) >> 16);
 
-        if (sampleEntry.Type == "alac")
+        var childrenStart = sampleEntry.PayloadStart + CommonFieldsLength;
+
+        // Encrypted sample entries ("drms" FairPlay, "enca" generic) wrap a real codec whose
+        // four-char type is named by a nested sinf/frma box (ISO/IEC 14496-12 §8.12) — recover it
+        // so an encrypted ALAC entry gets the same magic-cookie treatment a plain "alac" entry
+        // does instead of being misread as lossy. The frma box is plain container metadata, never
+        // encrypted payload, so reading it keeps the "no DRM-protected byte is ever touched"
+        // guarantee.
+        var codec = sampleEntry.Type is "drms" or "enca"
+            ? ReadSinfOriginalFormat(stream, childrenStart, sampleEntry.PayloadEnd) ?? sampleEntry.Type
+            : sampleEntry.Type;
+
+        if (codec == "alac")
         {
-            var cookieStart = sampleEntry.PayloadStart + CommonFieldsLength;
-            if (cookieStart < sampleEntry.PayloadEnd)
+            // The magic-cookie config box sits among the sample entry's child boxes (first child
+            // for a plain "alac" entry; alongside sinf/esds/... for an encrypted one).
+            if (FindBox(stream, "alac", childrenStart, sampleEntry.PayloadEnd) is { } cookieBox &&
+                ParseAlacMagicCookie(stream, cookieBox) is { } cookieFormat)
             {
-                stream.Position = cookieStart;
-                if (ReadBoxHeader(stream, sampleEntry.PayloadEnd) is { Type: "alac" } cookieHeader &&
-                    ParseAlacMagicCookie(stream, new Box(cookieHeader.Type, cookieHeader.PayloadStart, cookieHeader.BoxEnd)) is { } cookieFormat)
-                {
-                    return cookieFormat;
-                }
+                return cookieFormat;
             }
 
             // No readable magic cookie — still report the outer sample-entry rate, just without
@@ -174,10 +181,28 @@ public sealed class PlayCacheAudioFormatProbe : IAudioFileFormatProbe
             return outerSampleRateHz > 0 ? new AudioFileFormat(outerSampleRateHz, null) : null;
         }
 
-        // mp4a (AAC), drms (FairPlay-protected AAC), and enca (generic encrypted — real codec
-        // named by an unread sinf/frma box) are all lossy from this probe's point of view: no PCM
-        // bit depth to report, just the outer sample-entry rate.
+        // mp4a (AAC) — plain or recovered from an encrypted entry's frma — is lossy from this
+        // probe's point of view: no PCM bit depth to report, just the outer sample-entry rate.
         return outerSampleRateHz > 0 ? new AudioFileFormat(outerSampleRateHz, null) : null;
+    }
+
+    /// <summary>
+    /// Reads the original (pre-encryption) sample-entry type out of an encrypted sample entry's
+    /// <c>sinf/frma</c> box — e.g. "mp4a" for a FairPlay AAC "drms" entry — or null when the box
+    /// is missing/truncated.
+    /// </summary>
+    private static string? ReadSinfOriginalFormat(Stream stream, long rangeStart, long rangeEnd)
+    {
+        if (FindBox(stream, "sinf", rangeStart, rangeEnd) is not { } sinf ||
+            FindBox(stream, "frma", sinf.PayloadStart, sinf.PayloadEnd) is not { } frma ||
+            frma.PayloadEnd - frma.PayloadStart < 4)
+        {
+            return null;
+        }
+
+        stream.Position = frma.PayloadStart;
+        Span<byte> formatBuffer = stackalloc byte[4];
+        return stream.Read(formatBuffer) == 4 ? Encoding.ASCII.GetString(formatBuffer) : null;
     }
 
     /// <summary>

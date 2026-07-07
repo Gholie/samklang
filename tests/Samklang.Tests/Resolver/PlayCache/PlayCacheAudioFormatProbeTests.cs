@@ -88,14 +88,24 @@ public sealed class PlayCacheAudioFormatProbeTests : IDisposable
     private static byte[] BuildMp4aSampleEntry(int sampleRateHz) =>
         BuildBox("mp4a", BuildAudioSampleEntryCommonFields(2, sampleRateHz));
 
+    /// <summary>The protection-scheme box an encrypted sample entry names its real codec with: <c>sinf</c> wrapping a 4-char <c>frma</c>.</summary>
+    private static byte[] BuildSinf(string originalFormat) =>
+        BuildBox("sinf", BuildBox("frma", Encoding.ASCII.GetBytes(originalFormat)));
+
     /// <summary>
-    /// A minimal "drms" (FairPlay-protected AAC) sample entry — the real sample entry type found
-    /// in every cache file on a real Windows install (issue #20). Real entries carry DRM child
-    /// boxes (esds, sinf, uuid, ...) after the common fields, but those aren't read by the probe
-    /// (only the outer AudioSampleEntry common fields are), so this fixture omits them.
+    /// A "drms" (FairPlay-protected) sample entry mirroring the real layout found in every cache
+    /// file on a real Windows install (issue #20): the outer AudioSampleEntry common fields, then
+    /// DRM child boxes with <c>sinf/frma</c> naming the wrapped codec sitting among siblings (the
+    /// real box tree was <c>'drms'{esds,dmix,udi2,udc2,udex,sbtd,sinf,uuid,free}</c> — an opaque
+    /// stand-in for the preceding siblings keeps "sinf is not the first child" true here).
     /// </summary>
-    private static byte[] BuildDrmsSampleEntry(int sampleRateHz) =>
-        BuildBox("drms", BuildAudioSampleEntryCommonFields(2, sampleRateHz));
+    private static byte[] BuildDrmsSampleEntry(int sampleRateHz, string originalFormat = "mp4a", byte[]? extraChild = null) =>
+        BuildBox(
+            "drms",
+            BuildAudioSampleEntryCommonFields(2, sampleRateHz),
+            BuildBox("esds", new byte[6]), // opaque DRM sibling before sinf, as on real files
+            BuildSinf(originalFormat),
+            extraChild ?? []);
 
     private static byte[] BuildEncaSampleEntry(int sampleRateHz) =>
         BuildBox("enca", BuildAudioSampleEntryCommonFields(2, sampleRateHz));
@@ -159,11 +169,28 @@ public sealed class PlayCacheAudioFormatProbeTests : IDisposable
     }
 
     [Fact]
-    public void Probe_reads_the_sample_rate_from_a_generic_enca_encrypted_sample_entry()
+    public void Probe_recovers_a_lossless_alac_codec_from_an_encrypted_entrys_sinf_frma_box()
     {
-        // "enca" is accepted defensively (its real codec is named by a nested sinf/frma box this
-        // probe doesn't read) — unlike "drms" this was NOT observed on real hardware in issue #20,
-        // but falls through the same outer-sample-rate handling as mp4a/drms.
+        // An encrypted entry whose sinf/frma names "alac" is really encrypted lossless — the
+        // probe must recover the codec and read the ALAC magic cookie's true bit depth/rate
+        // instead of misreading the entry as lossy AAC.
+        var sampleEntry = BuildDrmsSampleEntry(
+            44_100, originalFormat: "alac", extraChild: BuildAlacMagicCookie(bitDepth: 24, numChannels: 2, sampleRateHz: 96_000));
+        var path = WriteFile("track.m4p", BuildM4aFile(sampleEntry));
+
+        var result = _probe.Probe(path);
+
+        Assert.NotNull(result);
+        Assert.Equal(96_000, result!.SampleRateHz);
+        Assert.Equal(24, result.BitDepth);
+    }
+
+    [Fact]
+    public void Probe_falls_back_to_lossy_handling_when_an_encrypted_entry_has_no_sinf_frma_box()
+    {
+        // "enca" is accepted defensively — unlike "drms" this was NOT observed on real hardware
+        // in issue #20. With no sinf/frma naming the wrapped codec, it falls through the same
+        // outer-sample-rate handling as mp4a/drms.
         var sampleEntry = BuildEncaSampleEntry(48_000);
         var path = WriteFile("track.m4a", BuildM4aFile(sampleEntry));
 
