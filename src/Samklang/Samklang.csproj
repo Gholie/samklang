@@ -14,10 +14,12 @@
     <RootNamespace>Samklang</RootNamespace>
     <AssemblyName>Samklang</AssemblyName>
     <!-- Single source of truth for the app version (issue #10): shown in the tray/UI via
-         VersionInfo, embedded in the built assembly, and what the release workflow's
-         `dotnet publish -p:Version=...` overrides at release time to match the pushed tag so the
-         running app's displayed version always matches the Velopack package it came from. -->
-    <Version>0.1.0</Version>
+         VersionInfo and embedded in the built assembly. Bumped automatically by release-please's
+         release PR (the x-release-please-version marker is what its updater rewrites — see
+         release-please-config.json); the release workflow additionally passes the same version
+         via `dotnet publish -p:Version=...` so the published assembly always matches the GitHub
+         Release it ships in. -->
+    <Version>0.1.0</Version> <!-- x-release-please-version -->
   </PropertyGroup>
 
   <!-- Velopack (issue #10) requires a hand-written Main so it can run its startup hooks before
@@ -47,7 +49,7 @@
          handles first-run/update/uninstall hooks; AppUpdateService (Updates/) wraps
          UpdateManager + GithubSource for the in-app "check GitHub Releases and self-update" flow.
          Version 1.2.0 is current as of the M4 release work (per docs.velopack.io) — keep the `vpk`
-         CLI tool used in .github/workflows/release.yml at the same version. -->
+         CLI tool used in .github/workflows/release-please.yml at the same version. -->
     <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
 

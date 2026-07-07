@@ -233,6 +233,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private async Task CheckForUpdatesFromTrayAsync()
     {
         var result = await _updateService.CheckAndApplyUpdateAsync();
+
+        // The check can outlive the tray icon: if the user hit Exit while it was in flight, the
+        // icon is already disposed and ShowBalloonTip would throw inside an async-void event
+        // chain — taking the whole process down on its way out.
+        if (_isExiting)
+        {
+            return;
+        }
+
         var message = result switch
         {
             UpdateCheckResult.NotInstalled => "Update checks are only available in an installed copy of Samklang.",

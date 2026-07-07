@@ -17,9 +17,8 @@ point of this handoff.
 
 ## Where things stand (as of this handoff)
 
-Repo: `Gholie/samklang`, this checkout at
-`C:\Users\nikol\felleskode\apple-music-win-sync` (same path as
-`/mnt/c/Users/nikol/felleskode/apple-music-win-sync` from WSL).
+Repo: `Gholie/samklang` — clone it wherever suits you; nothing below depends on a
+particular checkout path.
 
 Domain vocabulary you need before touching anything: read `CONTEXT.md` at repo root.
 Project plan/milestones: `docs/PLAN.md`.
@@ -161,22 +160,37 @@ Nothing here has been visually verified — treat it as a from-scratch UI smoke 
 Velopack referenced and `VelopackApp.Build().Run()` called from a hand-written `Main`;
 `AppUpdateService`'s own unit tests confirm it constructs without throwing and reports
 `NotInstalled` when run outside a real Velopack install (i.e. exactly the environment
-`dotnet run`, `dotnet test`, and CI all run in). The `.github/workflows/release.yml`
+`dotnet run`, `dotnet test`, and CI all run in). The `.github/workflows/release-please.yml`
 YAML was validated for syntax but **never actually run** — nothing in the dev
-environment can push a tag or execute a `windows-latest` GitHub Actions runner.
+environment can merge a release PR or execute a `windows-latest` GitHub Actions runner.
+
+**How releases work (release-please):** releases are not cut by hand-pushing tags.
+`release-please` watches Conventional Commits on `main` and maintains a "release PR"
+(version bump in `Samklang.csproj` + `CHANGELOG.md`). Merging that PR makes it create
+a *draft* GitHub Release; the same workflow run then builds the Velopack artifacts,
+attests their build provenance, attaches them to the draft, and publishes it. The
+draft stage is what guarantees a release is never publicly visible (including to the
+app's own update check, which ignores drafts) without attested artifacts on it.
 
 **What a human must verify on a real Windows machine, in order:**
 
-1. **First tagged release end-to-end.** Push a `v0.1.0` tag and watch
-   `.github/workflows/release.yml` run to completion. Confirm:
+1. **First release end-to-end.** Merge the release-please PR proposing `v0.1.0` (it
+   should appear after this work lands on `main`; confirm it proposes `0.1.0` and that
+   its diff bumps `<Version>` in `Samklang.csproj`), then watch
+   `.github/workflows/release-please.yml`'s `build-and-publish` job run to completion.
+   Confirm:
    - The build/test steps pass on the `windows-latest` runner.
    - `vpk download github` doesn't hard-fail the job on this *first* release (there's
-     no prior release to download yet — the step has `continue-on-error: true` for
-     exactly this reason; confirm the rest of the job still produces a correct,
-     installable package despite it).
-   - A GitHub Release is created for the tag with `Samklang-Setup.exe` (and the
-     accompanying `.nupkg`/portable zip) attached as assets.
-2. **Fresh install.** Download `Samklang-Setup.exe` from that release on a clean (or
+     no prior published release to download yet — the step has
+     `continue-on-error: true` for exactly this reason; confirm the rest of the job
+     still produces a correct, installable package despite it).
+   - The GitHub Release starts as a **draft**, gets the installer (named
+     `Samklang-win-Setup.exe` or similar — note the exact name and fix the README's
+     Install section if it differs) plus `.nupkg`/portable zip attached, and is then
+     automatically flipped to published with the `v0.1.0` tag created.
+   - The provenance attestation verifies:
+     `gh attestation verify <downloaded Samklang-win-Setup.exe> --repo Gholie/samklang`.
+2. **Fresh install.** Download the setup exe from that release on a clean (or
    throwaway VM) Windows 11 machine and run it. Confirm:
    - No admin elevation prompt (per-user install).
    - SmartScreen's "unknown publisher" warning appears (expected — the exe isn't
@@ -186,9 +200,9 @@ environment can push a tag or execute a `windows-latest` GitHub Actions runner.
    - The dashboard window's title bar reads `Samklang v0.1.0`.
    - The tray menu's "Check for Updates" item is present and labeled with the current
      version.
-3. **Update detection and apply.** Once a *second* tag (e.g. `v0.1.1`) has been
-   released via the same workflow, on the machine still running the installed
-   `v0.1.0`:
+3. **Update detection and apply.** Once a *second* release (e.g. `v0.1.1`) has been
+   published via the same release-please flow (merge another release PR), on the
+   machine still running the installed `v0.1.0`:
    - Relaunch (or wait for) the app's startup update check to find, download, and
      apply the new version automatically, then confirm the app restarts on its own at
      the new version (tray tooltip/window title now read `v0.1.1`).

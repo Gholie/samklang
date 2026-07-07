@@ -4,7 +4,7 @@
 
 **Bit-perfect Apple Music playback on Windows.** *Samklang* (Norwegian: consonance — literally "together-sound") is a Windows 11 tray utility that switches your audio device's format (sample rate + bit depth) to match the track currently playing in **Apple Music for Windows** — so lossless and hi-res tracks play without resampling.
 
-> **Status: public release.** v0.1.0 is the first tagged release — see [docs/PLAN.md](docs/PLAN.md) for the roadmap and [releases](https://github.com/Gholie/samklang/releases) for downloads.
+> **Status: approaching first public release.** v0.1.0 lands as soon as the first release-please PR is merged — see [docs/PLAN.md](docs/PLAN.md) for the roadmap and [releases](https://github.com/Gholie/samklang/releases) for downloads once it's there.
 
 ## Why
 
@@ -12,7 +12,7 @@ Windows resamples every app's audio to the device's shared-mode format (the "Def
 
 ## Install
 
-1. Grab the latest installer from the [Releases page](https://github.com/Gholie/samklang/releases) — download `Samklang-Setup.exe` from the newest release's Assets.
+1. Grab the latest installer from the [Releases page](https://github.com/Gholie/samklang/releases) — download the `*-Setup.exe` asset (`Samklang-win-Setup.exe`) from the newest release. Every release's artifacts carry a [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) you can verify with `gh attestation verify Samklang-win-Setup.exe --repo Gholie/samklang`.
 2. Run it. There's no install wizard to click through — it installs to your user profile (no admin prompt) and launches Samklang automatically when it's done.
 3. Windows SmartScreen may warn that this is from an "unknown publisher" the first time, since the installer isn't code-signed yet — click **More info → Run anyway** to proceed.
 
@@ -58,6 +58,10 @@ Only needed if you're developing Samklang, not for normal use — see [Install](
 dotnet build
 dotnet test
 ```
+
+### Releasing
+
+Releases are cut by [release-please](https://github.com/googleapis/release-please), not by hand: Conventional Commits on `main` accumulate into an automatically maintained release PR (semver bump + changelog). Merging that PR creates a draft GitHub Release; the same workflow then builds the Velopack installer, attaches a build provenance attestation, uploads the artifacts, and publishes the release — at which point installed copies pick the update up automatically.
 
 ## Prior art
 

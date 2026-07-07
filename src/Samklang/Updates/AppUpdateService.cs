@@ -31,14 +31,14 @@ public enum UpdateCheckResult
 /// <para>
 /// Every entry point is guarded so this can be constructed and called unconditionally from
 /// <c>MainWindow</c> without the caller needing its own installed-check: this app only becomes a
-/// real Velopack install once distributed via <c>.github/workflows/release.yml</c>'s packaging
+/// real Velopack install once distributed via <c>.github/workflows/release-please.yml</c>'s packaging
 /// step, so plain <c>dotnet run</c>, unit tests, and CI builds must all take the "not installed,
 /// nothing to do" path rather than throwing.
 /// </para>
 /// </summary>
 public sealed class AppUpdateService
 {
-    // Must match .github/workflows/release.yml's --repoUrl / GithubSource's expected format —
+    // Must match .github/workflows/release-please.yml's --repoUrl / GithubSource's expected format —
     // this is where GithubSource looks for release assets published by `vpk upload github`.
     private const string RepositoryUrl = "https://github.com/Gholie/samklang";
 

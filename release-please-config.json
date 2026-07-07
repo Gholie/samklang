@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "bump-minor-pre-major": true,
+  "draft": true,
+  "packages": {
+    ".": {
+      "extra-files": [
+        "src/Samklang/Samklang.csproj"
+      ]
+    }
+  }
+}
