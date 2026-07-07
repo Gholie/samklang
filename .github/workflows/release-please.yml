@@ -49,11 +49,43 @@ jobs:
           client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_KEY }}
 
-      - name: Run release-please
+      # release-please is deliberately run twice, with a tag-creation step in between. A single
+      # invocation runs its two phases back to back: (1) create a GitHub Release for a just-merged
+      # release PR, then (2) build/update the next release PR. Because our Releases start as
+      # *drafts* (see header comment), phase 1 creates no git tag — GitHub only creates the tag
+      # when the draft is published, minutes later in build-and-publish. Phase 2 detects "what was
+      # already released" via published releases and git tags, both of which are still missing at
+      # that instant, so it concluded nothing was ever released and opened a bogus release PR
+      # containing every commit since the last published tag (issue #32, PR #29). Splitting the
+      # phases lets us create the tag before the PR phase runs, so it always sees the release.
+      - name: Run release-please (create release)
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ steps.app-token.outputs.token }}
+          skip-github-pull-request: true
+
+      # Create the release tag immediately instead of waiting for publish. release-please needs it
+      # (see above), and publishing the draft later just reuses the existing tag — same name, same
+      # commit — so the attach-then-publish flow is unaffected. Idempotent for job re-runs.
+      - name: Tag release commit
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          if gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" --silent 2>/dev/null; then
+            echo "Tag $TAG already exists, skipping"
+          else
+            gh api "repos/${{ github.repository }}/git/refs" -f ref="refs/tags/$TAG" -f sha="$SHA"
+          fi
+
+      - name: Run release-please (release PR)
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          skip-github-release: true
 
   # Only runs on the push that merged a release PR (release_created), i.e. once per release.
   # Note: because the release PR is created with the default GITHUB_TOKEN, ci.yml does not run on
@@ -124,13 +156,14 @@ jobs:
 
       # Everything vpk emitted goes onto the Release — the updater (GithubSource) reads the
       # release's assets, so the .nupkg/setup/manifest files must all land there, not just the
-      # installer. `gh` resolves draft releases by their tag name even though the git tag itself
-      # is only created at publish time.
+      # installer. `gh` resolves draft releases by their tag name (the tag itself already exists —
+      # the release-please job above creates it eagerly so release detection works).
       - name: Attach artifacts to the draft release
         shell: bash
         run: gh release upload "${{ needs.release-please.outputs.tag_name }}" Releases/* --clobber --repo ${{ github.repository }}
 
-      # Publishing creates the git tag and, with immutable releases enabled on this repository,
+      # Publishing attaches the release to the existing git tag and, with immutable releases
+      # enabled on this repository,
       # freezes the asset list and generates GitHub's release attestation for every asset —
       # verifiable with `gh attestation verify <file> --repo <owner/repo>
       # --predicate-type https://in-toto.io/attestation/release/v0.1`.
