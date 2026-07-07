@@ -6,7 +6,8 @@ namespace Samklang.Devices;
 /// Applies a Format Resolution's Target Format to the effective render device's shared-mode
 /// Device Format. Per this issue's acceptance criteria: switching mutes the device immediately
 /// before and unmutes immediately after, and is skipped entirely when the device is already at
-/// the Target Format.
+/// the Target Format's sample rate — a bit-depth-only difference never triggers a switch, since
+/// bit depth is pinned to 24-bit upstream and 24-bit playback of 16-bit content is bit-perfect.
 ///
 /// "The effective render device" is either the Windows default (Follow mode) or a specific
 /// pinned device (Pinned mode), as set via <see cref="SetTargeting"/> and resolved fresh on every
@@ -19,9 +20,10 @@ public interface IDeviceController
     DeviceFormat? GetCurrentFormat();
 
     /// <summary>
-    /// Switches the effective render device to <paramref name="target"/> unless it is already
-    /// there. Returns true if a switch was performed, false if it was skipped because the
-    /// device already matches (or because there is no effective device to switch right now).
+    /// Switches the effective render device to <paramref name="target"/> unless it already runs
+    /// at the target's sample rate (bit depth alone is never worth a switch). Returns true if a
+    /// switch was performed, false if it was skipped because the device's rate already matches
+    /// (or because there is no effective device to switch right now).
     /// </summary>
     bool ApplyTargetFormat(DeviceFormat target);
 

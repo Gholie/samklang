@@ -34,6 +34,21 @@ namespace Samklang.Resolver.Catalog;
 /// </para>
 ///
 /// <para>
+/// <b>Next-track prefetch buffer.</b> SMTC exposes no play queue, so the literal next track can't
+/// be read anywhere — but it can be predicted: albums usually play in order. After every
+/// successful lookup this layer fetches the matched song's album track list in the background
+/// (<see cref="IAppleMusicCatalogClient.FetchAlbumTracksAsync"/>), resolves the manifest of the
+/// track that follows the current one, and parks the result in a one-slot buffer. When the next
+/// <see cref="TryResolve"/> call's Track matches the prediction (scored by
+/// <see cref="CatalogTrackMatcher"/>, the same conservative gate the search path uses), the
+/// buffered resolution is returned instantly — no network round trip and no bounded wait, so the
+/// device switch lands right at the track boundary — and the track *after* that one is prefetched
+/// in turn, reusing the already-fetched album list. A miss (shuffle, a different album, a
+/// playlist jump) simply falls through to the normal lookup path, and any prefetch failure is
+/// swallowed: prefetching is purely opportunistic and must never make anything worse.
+/// </para>
+///
+/// <para>
 /// <b>Failure handling</b> (ADR-0001: "must degrade gracefully... never hard-fail"). Failing to
 /// obtain a usable token at all is treated as session-fatal — if the anonymous scrape or amp-api
 /// auth is broken, retrying it per-track wastes the resolve budget for nothing, so this layer
@@ -67,6 +82,16 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
     private readonly Dictionary<Track, FormatResolution> _completed = new();
     private AppleMusicToken? _cachedToken;
 
+    /// <summary>The one-slot next-track buffer: the predicted next Track's already-resolved format, or null.</summary>
+    private PrefetchedNextTrack? _prefetched;
+
+    /// <summary>
+    /// The catalog id whose "next track" the buffer currently holds or is being filled for —
+    /// dedupes prefetch kicks (SMTC can re-fire for the same Track) and lets a stale, slow
+    /// prefetch detect it has been superseded before overwriting a newer buffer.
+    /// </summary>
+    private string? _prefetchAnchorId;
+
     // Written from a background lookup thread, read by every TryResolve caller.
     private volatile bool _isDisabledForSession;
 
@@ -99,6 +124,13 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
     /// </summary>
     public event EventHandler<LateResolutionEventArgs>? LateResolutionAvailable;
 
+    /// <summary>
+    /// Raised when the predicted next Track's format has been prefetched into the buffer, mainly
+    /// so tests (and, later, a dashboard "up next" hint) can observe the otherwise-background
+    /// prefetch completing.
+    /// </summary>
+    public event EventHandler<NextTrackPrefetchedEventArgs>? NextTrackPrefetched;
+
     public FormatResolution? TryResolve(Track track)
     {
         if (IsDisabledForSession)
@@ -106,7 +138,8 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
             return null;
         }
 
-        Task<FormatResolution?> task;
+        Task<FormatResolution?> task = null!;
+        PrefetchedNextTrack? bufferHit;
         lock (_gate)
         {
             if (_completed.TryGetValue(track, out var cached))
@@ -114,11 +147,26 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
                 return cached;
             }
 
-            if (!_inFlight.TryGetValue(track, out task!))
+            bufferHit = TakeMatchingPrefetchLocked(track);
+            if (bufferHit is not null)
+            {
+                // Promote to the per-Track cache under the *actual* SMTC key, so replays of this
+                // track hit the ordinary cache path from now on.
+                CacheCompletedLocked(track, bufferHit.Resolution);
+            }
+            else if (!_inFlight.TryGetValue(track, out task!))
             {
                 task = ResolveCoreSafeAsync(track);
                 _inFlight[track] = task;
             }
+        }
+
+        if (bufferHit is not null)
+        {
+            // The prediction landed: answer instantly, and keep the buffer one step ahead by
+            // prefetching the track after this one — the album list is already in hand.
+            StartNextTrackPrefetch(bufferHit.AlbumTracks[bufferHit.Index].Id, bufferHit.AlbumTracks);
+            return bufferHit.Resolution;
         }
 
         if (task.Wait(_resolveTimeout))
@@ -153,12 +201,7 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
             // (one per TryResolve call, capped at _backgroundCeiling), so this can't run away.
             if (result is not null)
             {
-                if (_completed.Count >= CompletedCacheCapacity && !_completed.ContainsKey(track))
-                {
-                    _completed.Clear();
-                }
-
-                _completed[track] = result;
+                CacheCompletedLocked(track, result);
             }
 
             _inFlight.Remove(track);
@@ -168,6 +211,35 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
         {
             LateResolutionAvailable?.Invoke(this, new LateResolutionEventArgs(track, result));
         }
+    }
+
+    /// <summary>Caller must hold <see cref="_gate"/>. See <see cref="CompletedCacheCapacity"/> for the eviction rationale.</summary>
+    private void CacheCompletedLocked(Track track, FormatResolution result)
+    {
+        if (_completed.Count >= CompletedCacheCapacity && !_completed.ContainsKey(track))
+        {
+            _completed.Clear();
+        }
+
+        _completed[track] = result;
+    }
+
+    /// <summary>
+    /// Caller must hold <see cref="_gate"/>. Consumes and returns the buffered prefetch when
+    /// <paramref name="track"/> is the Track it predicted — scored by
+    /// <see cref="CatalogTrackMatcher"/>, the same conservative normalized title+artist gate the
+    /// search path trusts for Exact confidence — or returns null (buffer untouched) otherwise.
+    /// </summary>
+    private PrefetchedNextTrack? TakeMatchingPrefetchLocked(Track track)
+    {
+        if (_prefetched is not { } buffered ||
+            CatalogTrackMatcher.FindBestMatch(track, [buffered.AlbumTracks[buffered.Index]]) is null)
+        {
+            return null;
+        }
+
+        _prefetched = null;
+        return buffered;
     }
 
     private async Task<FormatResolution?> ResolveCoreSafeAsync(Track track)
@@ -233,12 +305,122 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
         }
 
         var format = EnhancedHlsManifestParser.ParseBestLosslessFormat(manifest);
+        if (format is null)
+        {
+            return null;
+        }
+
+        // This Track resolved, so it's the best available anchor for predicting the next one —
+        // fill the buffer in the background. Runs for prompt and late successes alike (both end
+        // up here), which is exactly right: even a late-arriving current-track resolution makes
+        // the *next* track's prediction worth having ready.
+        StartNextTrackPrefetch(match.Id, knownAlbumTracks: null);
 
         // ParseBestLosslessFormat only ever matches ALAC variants (see its AUDIO-FORMAT filter),
         // so a result here is always genuinely lossless — IsLossless: true, not left null.
-        return format is null ? null : new FormatResolution(format.Value, ResolutionConfidence.Exact, Name, IsLossless: true);
+        return new FormatResolution(format.Value, ResolutionConfidence.Exact, Name, IsLossless: true);
     }
+
+    /// <summary>
+    /// Kicks off the background fill of the next-track buffer, predicting "the album track after
+    /// <paramref name="currentCatalogTrackId"/>". Deduped per anchor id, so SMTC re-firing the
+    /// same Track doesn't spawn duplicate lookups. Fire-and-forget by design:
+    /// <see cref="PrefetchNextTrackAsync"/> swallows every failure and is bounded by
+    /// <see cref="_backgroundCeiling"/>, mirroring how background lookups are already handled.
+    /// </summary>
+    private void StartNextTrackPrefetch(string currentCatalogTrackId, IReadOnlyList<CatalogSearchCandidate>? knownAlbumTracks)
+    {
+        lock (_gate)
+        {
+            if (_prefetchAnchorId == currentCatalogTrackId)
+            {
+                return;
+            }
+
+            _prefetchAnchorId = currentCatalogTrackId;
+        }
+
+        _ = PrefetchNextTrackAsync(currentCatalogTrackId, knownAlbumTracks);
+    }
+
+    private async Task PrefetchNextTrackAsync(string currentCatalogTrackId, IReadOnlyList<CatalogSearchCandidate>? albumTracks)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(_backgroundCeiling);
+            var token = await GetOrRefreshTokenAsync(cts.Token).ConfigureAwait(false);
+            var storefront = _storefrontProvider.GetStorefront();
+
+            albumTracks ??= await _client.FetchAlbumTracksAsync(storefront, currentCatalogTrackId, token.Value, cts.Token)
+                .ConfigureAwait(false);
+
+            var currentIndex = IndexOfTrackId(albumTracks, currentCatalogTrackId);
+            if (currentIndex < 0 || currentIndex + 1 >= albumTracks.Count)
+            {
+                return; // last album track (or not found at all) — nothing to predict
+            }
+
+            var next = albumTracks[currentIndex + 1];
+            var manifest = await _client.FetchEnhancedHlsManifestAsync(storefront, next.Id, token.Value, cts.Token)
+                .ConfigureAwait(false);
+            if (manifest is null)
+            {
+                return;
+            }
+
+            var format = EnhancedHlsManifestParser.ParseBestLosslessFormat(manifest);
+            if (format is null)
+            {
+                return;
+            }
+
+            var resolution = new FormatResolution(format.Value, ResolutionConfidence.Exact, Name, IsLossless: true);
+            lock (_gate)
+            {
+                if (_prefetchAnchorId != currentCatalogTrackId)
+                {
+                    return; // a newer track's prefetch superseded this one while it was in flight
+                }
+
+                _prefetched = new PrefetchedNextTrack(albumTracks, currentIndex + 1, resolution);
+            }
+
+            NextTrackPrefetched?.Invoke(this, new NextTrackPrefetchedEventArgs(next, resolution));
+        }
+        catch
+        {
+            // Prefetching is purely opportunistic — any failure (album lookup, manifest, parse,
+            // timeout) just means the next track takes the normal lookup path.
+        }
+    }
+
+    private static int IndexOfTrackId(IReadOnlyList<CatalogSearchCandidate> tracks, string id)
+    {
+        for (var i = 0; i < tracks.Count; i++)
+        {
+            if (tracks[i].Id == id)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// The one-slot next-track buffer's contents: the album's ordered track list, the index of
+    /// the predicted (already-resolved) next track within it, and that track's Format Resolution.
+    /// Carrying the whole list lets a buffer hit chain straight into prefetching the *following*
+    /// track without re-fetching the album.
+    /// </summary>
+    private sealed record PrefetchedNextTrack(
+        IReadOnlyList<CatalogSearchCandidate> AlbumTracks,
+        int Index,
+        FormatResolution Resolution);
 }
 
 /// <summary>A Format Resolution that arrived after the <see cref="CatalogFormatResolverLayer"/> caller had already given up waiting.</summary>
 public sealed record LateResolutionEventArgs(Track Track, FormatResolution Resolution);
+
+/// <summary>The predicted next track (an album-order prediction, since SMTC exposes no play queue) whose Format Resolution is now buffered and ready.</summary>
+public sealed record NextTrackPrefetchedEventArgs(CatalogSearchCandidate NextTrack, FormatResolution Resolution);

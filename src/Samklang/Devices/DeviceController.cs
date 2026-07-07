@@ -4,9 +4,12 @@ namespace Samklang.Devices;
 
 /// <summary>
 /// The switch-or-skip decision behind <see cref="IDeviceController"/>: compares the Target
-/// Format against the effective device's actual current Device Format, skips entirely when they
-/// already match, and otherwise mutes, writes the new format, and unmutes — unmuting even if the
-/// write throws, so a failed switch never leaves the device silently muted.
+/// Format's sample rate against the effective device's actual current Device Format, skips
+/// entirely when the rates already match — bit depth alone never justifies the disruptive
+/// mute/switch cycle, since 24-bit playback of 16-bit content is bit-perfect (bit depth is
+/// pinned to 24-bit upstream, see <see cref="TrackSyncCoordinator"/>) — and otherwise mutes,
+/// writes the new format, and unmutes — unmuting even if the write throws, so a failed switch
+/// never leaves the device silently muted.
 ///
 /// Which device is "effective" is decided fresh on every call by
 /// <see cref="Domain.DeviceTargetResolver"/>, from the targeting choice set via
@@ -55,8 +58,11 @@ public sealed class DeviceController(IAudioEndpoint endpoint) : IDeviceControlle
             return false;
         }
 
+        // Same sample rate is enough to skip: a bit-depth-only difference (a device the user left
+        // at 16-bit, or a Resting Format configured at a different depth) is deliberately not
+        // worth the audible mute/switch interruption.
         var current = endpoint.GetCurrentFormat(deviceId);
-        if (current == target)
+        if (current?.SampleRateHz == target.SampleRateHz)
         {
             return false;
         }

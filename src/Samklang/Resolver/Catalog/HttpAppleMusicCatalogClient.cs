@@ -99,6 +99,49 @@ public sealed partial class HttpAppleMusicCatalogClient(HttpClient httpClient) :
         return await httpClient.GetStringAsync(manifestUri, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<CatalogSearchCandidate>> FetchAlbumTracksAsync(
+        string storefront, string catalogTrackId, string token, CancellationToken cancellationToken)
+    {
+        // Two amp-api hops: the song's albums relationship (ids only), then the first album's
+        // ordered track list. limit=300 is the relationship endpoint's maximum and comfortably
+        // covers any real album.
+        using var albumsRequest = CreateRequest(
+            HttpMethod.Get, $"{ApiBase}/{storefront}/songs/{catalogTrackId}/albums", token);
+        using var albumsResponse = await httpClient.SendAsync(albumsRequest, cancellationToken).ConfigureAwait(false);
+        albumsResponse.EnsureSuccessStatusCode();
+
+        var albumsPayload = await albumsResponse.Content
+            .ReadFromJsonAsync(CatalogJsonContext.Default.AlbumsLookupResponse, cancellationToken)
+            .ConfigureAwait(false);
+        var albumId = albumsPayload?.Data?.FirstOrDefault()?.Id;
+        if (string.IsNullOrEmpty(albumId))
+        {
+            return [];
+        }
+
+        using var tracksRequest = CreateRequest(
+            HttpMethod.Get, $"{ApiBase}/{storefront}/albums/{albumId}/tracks?limit=300", token);
+        using var tracksResponse = await httpClient.SendAsync(tracksRequest, cancellationToken).ConfigureAwait(false);
+        tracksResponse.EnsureSuccessStatusCode();
+
+        // Same { data: [song resources] } shape as a song lookup, so the response type is reused.
+        var tracksPayload = await tracksResponse.Content
+            .ReadFromJsonAsync(CatalogJsonContext.Default.SongLookupResponse, cancellationToken)
+            .ConfigureAwait(false);
+        var tracks = tracksPayload?.Data;
+        if (tracks is null)
+        {
+            return [];
+        }
+
+        return tracks
+            // An album's track list can also carry music-video resources; only songs are
+            // meaningful next-track predictions.
+            .Where(track => track.Type == "songs")
+            .Select(track => new CatalogSearchCandidate(track.Id, track.Attributes.Name, track.Attributes.ArtistName, track.Attributes.AlbumName))
+            .ToList();
+    }
+
     private static HttpRequestMessage CreateRequest(HttpMethod method, string url, string token)
     {
         var request = new HttpRequestMessage(method, url);
@@ -170,8 +213,25 @@ internal sealed class CatalogSong
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
+    // Defaults to "songs" because search (types=songs) and song-lookup responses are always
+    // songs; only an album's track list mixes in other resource types worth filtering out.
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "songs";
+
     [JsonPropertyName("attributes")]
     public CatalogSongAttributes Attributes { get; set; } = new();
+}
+
+internal sealed class AlbumsLookupResponse
+{
+    [JsonPropertyName("data")]
+    public List<AlbumRef>? Data { get; set; }
+}
+
+internal sealed class AlbumRef
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
 }
 
 internal sealed class CatalogSongAttributes
@@ -197,6 +257,7 @@ internal sealed class ExtendedAssetUrls
 
 [JsonSerializable(typeof(SearchResponse))]
 [JsonSerializable(typeof(SongLookupResponse))]
+[JsonSerializable(typeof(AlbumsLookupResponse))]
 internal partial class CatalogJsonContext : JsonSerializerContext
 {
 }

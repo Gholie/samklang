@@ -148,8 +148,11 @@ public sealed class DashboardViewModel : ViewModelBase
         // The coordinator clamps the requested Target Format to a rate the device actually
         // supports (Domain.RateFamilyClamp) before applying it; when that changed the rate, show
         // both so the user isn't left wondering why playback isn't at the rate the track implies.
+        // Compare rates only: the coordinator also pins the applied bit depth to 24 (a 16-bit
+        // source deliberately plays at 24-bit), and that intentional pinning must not read as
+        // "device doesn't support it".
         var applied = _coordinator.AppliedFormat;
-        if (resolution is not null && applied is not null && applied.Value != resolution.Target)
+        if (resolution is not null && applied is not null && applied.Value.SampleRateHz != resolution.Target.SampleRateHz)
         {
             HasClampedFormat = true;
             ClampedFormatDisplay = $"{applied} (device doesn't support {resolution.Target})";

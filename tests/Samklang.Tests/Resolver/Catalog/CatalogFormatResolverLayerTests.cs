@@ -18,8 +18,10 @@ public class CatalogFormatResolverLayerTests
         public int FetchTokenCallCount { get; private set; }
         public int SearchCallCount { get; private set; }
         public int ManifestCallCount { get; private set; }
+        public int AlbumTracksCallCount { get; private set; }
         public string? LastSearchStorefront { get; private set; }
         public string? LastManifestStorefront { get; private set; }
+        public string? LastAlbumTracksTrackId { get; private set; }
 
         public Func<CancellationToken, Task<AppleMusicToken>> FetchTokenImpl { get; set; } =
             _ => Task.FromResult(new AppleMusicToken("token", DateTimeOffset.UtcNow.AddHours(1)));
@@ -30,6 +32,11 @@ public class CatalogFormatResolverLayerTests
 
         public Func<string, string, string, CancellationToken, Task<string?>> ManifestImpl { get; set; } =
             (_, _, _, _) => Task.FromResult<string?>(DefaultManifest);
+
+        // Empty by default: with no album to predict from, prefetching quietly does nothing and
+        // the pre-existing tests are unaffected.
+        public Func<string, string, string, CancellationToken, Task<IReadOnlyList<CatalogSearchCandidate>>> AlbumTracksImpl { get; set; } =
+            (_, _, _, _) => Task.FromResult<IReadOnlyList<CatalogSearchCandidate>>([]);
 
         public Task<AppleMusicToken> FetchTokenAsync(CancellationToken cancellationToken)
         {
@@ -51,6 +58,14 @@ public class CatalogFormatResolverLayerTests
             ManifestCallCount++;
             LastManifestStorefront = storefront;
             return ManifestImpl(storefront, catalogTrackId, token, cancellationToken);
+        }
+
+        public Task<IReadOnlyList<CatalogSearchCandidate>> FetchAlbumTracksAsync(
+            string storefront, string catalogTrackId, string token, CancellationToken cancellationToken)
+        {
+            AlbumTracksCallCount++;
+            LastAlbumTracksTrackId = catalogTrackId;
+            return AlbumTracksImpl(storefront, catalogTrackId, token, cancellationToken);
         }
     }
 
@@ -301,5 +316,165 @@ public class CatalogFormatResolverLayerTests
         Assert.Equal(1, client.SearchCallCount);
 
         searchTcs.SetResult([new CatalogSearchCandidate("id-1", track.Title, track.Artist, track.Album)]);
+    }
+
+    // --- Next-track prefetch buffer ---
+
+    private const string HiResManifest = """
+        #EXTM3U
+        #EXT-X-STREAM-INF:AUDIO-FORMAT="alac",SAMPLE-RATE=192000,BIT-DEPTH=24,CODECS="alac"
+        audio.m3u8
+        """;
+
+    /// <summary>An album whose first track ("id-1") is what the default SearchImpl matches, so resolving "Track One" anchors the prefetch prediction at "id-2".</summary>
+    private static readonly IReadOnlyList<CatalogSearchCandidate> AlbumTracks =
+    [
+        new("id-1", "Track One", "Artist", "Album"),
+        new("id-2", "Track Two", "Artist", "Album"),
+        new("id-3", "Track Three", "Artist", "Album"),
+    ];
+
+    private static FakeCatalogClient AlbumPlaybackClient() => new()
+    {
+        AlbumTracksImpl = (_, _, _, _) => Task.FromResult(AlbumTracks),
+        // Distinct rates per track so a buffer hit is distinguishable from a fresh lookup of the
+        // anchoring track: id-2 is hi-res, everything else uses the 96k default manifest.
+        ManifestImpl = (_, catalogTrackId, _, _) =>
+            Task.FromResult<string?>(catalogTrackId == "id-2" ? HiResManifest : DefaultManifest),
+    };
+
+    private static Track AlbumTrack(string title) => new(title, "Artist", "Album");
+
+    [Fact]
+    public void A_successful_resolve_prefetches_the_next_album_tracks_format_and_a_matching_track_change_is_answered_from_the_buffer()
+    {
+        var client = AlbumPlaybackClient();
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        NextTrackPrefetchedEventArgs? prefetched = null;
+        using var signal = new ManualResetEventSlim(false);
+        layer.NextTrackPrefetched += (_, args) =>
+        {
+            prefetched = args;
+            signal.Set();
+        };
+
+        var first = layer.TryResolve(AlbumTrack("Track One"));
+        Assert.Equal(new DeviceFormat(96_000, 24), first!.Target);
+
+        Assert.True(signal.Wait(TimeSpan.FromSeconds(5)), "expected the next album track's format to be prefetched");
+        Assert.Equal("id-1", client.LastAlbumTracksTrackId); // predicted from the *matched* track's album
+        Assert.Equal("id-2", prefetched!.NextTrack.Id);
+        Assert.Equal(new DeviceFormat(192_000, 24), prefetched.Resolution.Target);
+
+        // The predicted track arrives: the buffer answers instantly, with no new search round trip
+        // (and therefore none of the bounded wait a fresh lookup could burn).
+        var searchCallsSoFar = client.SearchCallCount;
+        var second = layer.TryResolve(AlbumTrack("Track Two"));
+
+        Assert.Equal(new DeviceFormat(192_000, 24), second!.Target);
+        Assert.Equal(ResolutionConfidence.Exact, second.Confidence);
+        Assert.True(second.IsLossless);
+        Assert.Equal(searchCallsSoFar, client.SearchCallCount);
+    }
+
+    [Fact]
+    public void A_buffer_hit_chains_the_prefetch_to_the_following_track_reusing_the_already_fetched_album_list()
+    {
+        var client = AlbumPlaybackClient();
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        var prefetchedIds = new List<string>();
+        using var prefetchSignal = new SemaphoreSlim(0);
+        layer.NextTrackPrefetched += (_, args) =>
+        {
+            lock (prefetchedIds)
+            {
+                prefetchedIds.Add(args.NextTrack.Id);
+            }
+
+            prefetchSignal.Release();
+        };
+
+        layer.TryResolve(AlbumTrack("Track One"));
+        Assert.True(prefetchSignal.Wait(TimeSpan.FromSeconds(5)), "expected the first prefetch (Track Two)");
+
+        layer.TryResolve(AlbumTrack("Track Two")); // buffer hit — should chain a prefetch of Track Three
+        Assert.True(prefetchSignal.Wait(TimeSpan.FromSeconds(5)), "expected the chained prefetch (Track Three)");
+
+        lock (prefetchedIds)
+        {
+            Assert.Equal(["id-2", "id-3"], prefetchedIds);
+        }
+
+        // The album list came along with the buffered entry, so the chained prefetch needed no
+        // second album lookup — and the now-buffered third track resolves without a search.
+        Assert.Equal(1, client.AlbumTracksCallCount);
+        var searchCallsSoFar = client.SearchCallCount;
+        var third = layer.TryResolve(AlbumTrack("Track Three"));
+
+        Assert.Equal(ResolutionConfidence.Exact, third?.Confidence);
+        Assert.Equal(searchCallsSoFar, client.SearchCallCount);
+    }
+
+    [Fact]
+    public void The_buffered_prediction_is_ignored_for_a_track_it_does_not_match_which_resolves_via_the_normal_search_path()
+    {
+        var client = AlbumPlaybackClient();
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+        using var signal = new ManualResetEventSlim(false);
+        layer.NextTrackPrefetched += (_, _) => signal.Set();
+
+        layer.TryResolve(AlbumTrack("Track One"));
+        Assert.True(signal.Wait(TimeSpan.FromSeconds(5)));
+        var searchCallsSoFar = client.SearchCallCount;
+
+        // The user shuffled/jumped: this is not the predicted "Track Two", so the conservative
+        // matcher must reject the buffer and a fresh search must run instead.
+        var result = layer.TryResolve(new Track("Somewhere Else Entirely", "Artist", "Album"));
+
+        Assert.Equal(searchCallsSoFar + 1, client.SearchCallCount);
+        Assert.Equal(new DeviceFormat(96_000, 24), result?.Target);
+    }
+
+    [Fact]
+    public void The_buffer_matches_through_the_same_normalization_as_the_search_path()
+    {
+        var client = AlbumPlaybackClient();
+        // The catalog titles the next track with a feat. suffix that SMTC won't report.
+        client.AlbumTracksImpl = (_, _, _, _) => Task.FromResult<IReadOnlyList<CatalogSearchCandidate>>(
+        [
+            new("id-1", "Track One", "Artist", "Album"),
+            new("id-2", "Track Two (feat. Guest)", "Artist", "Album"),
+        ]);
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+        using var signal = new ManualResetEventSlim(false);
+        layer.NextTrackPrefetched += (_, _) => signal.Set();
+
+        layer.TryResolve(AlbumTrack("Track One"));
+        Assert.True(signal.Wait(TimeSpan.FromSeconds(5)));
+        var searchCallsSoFar = client.SearchCallCount;
+
+        var second = layer.TryResolve(AlbumTrack("Track Two"));
+
+        Assert.Equal(new DeviceFormat(192_000, 24), second?.Target);
+        Assert.Equal(searchCallsSoFar, client.SearchCallCount);
+    }
+
+    [Fact]
+    public void A_failing_prefetch_is_swallowed_and_the_next_track_just_takes_the_normal_lookup_path()
+    {
+        var client = new FakeCatalogClient
+        {
+            AlbumTracksImpl = (_, _, _, _) => throw new HttpRequestException("album lookup broke"),
+        };
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        var first = layer.TryResolve(SampleTrack("Track One"));
+        var second = layer.TryResolve(SampleTrack("Track Two"));
+
+        Assert.Equal(ResolutionConfidence.Exact, first?.Confidence);
+        Assert.Equal(ResolutionConfidence.Exact, second?.Confidence);
+        Assert.False(layer.IsDisabledForSession);
     }
 }

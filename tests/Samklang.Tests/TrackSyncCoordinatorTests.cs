@@ -55,6 +55,8 @@ public class TrackSyncCoordinatorTests
         // clamping keep working without setting this up.
         public IReadOnlySet<int> SupportedSampleRates { get; set; } = new HashSet<int>();
 
+        public int? LastRequestedBitDepth { get; private set; }
+
         public DeviceFormat? GetCurrentFormat() => Current;
 
         public bool ApplyTargetFormat(DeviceFormat target)
@@ -64,7 +66,11 @@ public class TrackSyncCoordinatorTests
             return true;
         }
 
-        public IReadOnlySet<int> GetSupportedSampleRates(int bitDepth) => SupportedSampleRates;
+        public IReadOnlySet<int> GetSupportedSampleRates(int bitDepth)
+        {
+            LastRequestedBitDepth = bitDepth;
+            return SupportedSampleRates;
+        }
 
         public void SetTargeting(DeviceTargetingMode mode, string? pinnedDeviceId)
         {
@@ -138,6 +144,26 @@ public class TrackSyncCoordinatorTests
         Assert.Equal(expectedApplied, coordinator.AppliedFormat);
         Assert.Equal(expectedApplied, deviceController.LastAppliedTarget);
         Assert.NotEqual(coordinator.Resolution!.Target, coordinator.AppliedFormat);
+    }
+
+    [Fact]
+    public void TrackChanged_pins_a_16_bit_resolutions_applied_format_to_24_bit_while_keeping_the_resolution_for_display()
+    {
+        var watcher = new FakeTrackWatcher();
+        // A real 16-bit source (e.g. the PlayCache probe reading 16-bit ALAC) — the device must
+        // still be targeted at 24-bit, since 16-bit is deliberately ignored for switching.
+        var resolution = new FormatResolution(new DeviceFormat(44_100, 16), ResolutionConfidence.Exact, "PlayCache", IsLossless: true);
+        var resolver = new FakeResolver(resolution);
+        var deviceController = new FakeDeviceController();
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController, new FakeRestingFormatReverter());
+
+        watcher.Fire(new Track("Title", "Artist", "Album"));
+
+        Assert.Equal(new DeviceFormat(44_100, 24), coordinator.AppliedFormat);
+        Assert.Equal(new DeviceFormat(44_100, 24), deviceController.LastAppliedTarget);
+        Assert.Equal(24, deviceController.LastRequestedBitDepth);
+        // The resolution itself keeps the source's true bit depth so the UI can show it.
+        Assert.Equal(new DeviceFormat(44_100, 16), coordinator.Resolution!.Target);
     }
 
     [Fact]
