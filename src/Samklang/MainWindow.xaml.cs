@@ -10,6 +10,7 @@ using Samklang.Resolver.PlayCache;
 using Samklang.Sessions;
 using Samklang.SettingsManagement;
 using Samklang.Timing;
+using Samklang.Updates;
 using Samklang.ViewModels;
 
 namespace Samklang;
@@ -23,6 +24,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private readonly IStartupRegistration _startupRegistration;
     private readonly DispatcherTimer _pollTimer;
     private readonly HttpClient _catalogHttpClient;
+    private readonly AppUpdateService _updateService;
 
     // Issue #8: WPF has no native tray API, so this is System.Windows.Forms.NotifyIcon (enabled
     // via <UseWindowsForms> in the csproj) — fully-qualified throughout rather than `using`-ing
@@ -37,6 +39,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     public MainWindow()
     {
         InitializeComponent();
+
+        // Issue #10: version visible in the UI (also shown in the tray tooltip — see
+        // UpdateTrayTooltip) via a single formatting helper, so both stay in sync with the
+        // csproj's <Version> without duplicating string formatting.
+        Title = $"Samklang {VersionInfo.CurrentDisplay}";
 
         // Issue #9: follows the live Windows light/dark theme (and accent color) from here on —
         // the Light theme merged into App.xaml is just the initial resource load before this
@@ -68,6 +75,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _coordinator.PropertyChanged += (_, _) => Dispatcher.BeginInvoke(UpdateTrayTooltip);
 
         _startupRegistration = new RegistryStartupRegistration();
+        _updateService = new AppUpdateService();
 
         // Drives both the "live device format" reading (the device can change from outside our
         // own switches, e.g. the user changing it by hand in the Sound control panel) and the
@@ -121,6 +129,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             // apps running yet, etc.); leave the window showing its empty defaults rather than
             // crashing the app over a transient/absent Windows media session.
         }
+
+        // Issue #10: silent background update check on every startup. Deliberately fire-and-forget
+        // (not awaited) — AppUpdateService already no-ops outside a real install and swallows its
+        // own errors, so there's nothing here for the window to wait on or react to; a found
+        // update downloads and restarts the app on its own.
+        _ = _updateService.CheckAndApplyUpdateAsync();
     }
 
     /// <summary>
@@ -187,12 +201,18 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             UpdateTrayTooltip();
         };
 
+        // Issue #10: a manual complement to the silent startup check (Window_Loaded) — this one
+        // gives feedback via a balloon tip since the user explicitly asked for it.
+        var checkUpdatesItem = new System.Windows.Forms.ToolStripMenuItem($"Check for Updates ({VersionInfo.CurrentDisplay})");
+        checkUpdatesItem.Click += async (_, _) => await CheckForUpdatesFromTrayAsync();
+
         var exitItem = new System.Windows.Forms.ToolStripMenuItem("Exit");
         exitItem.Click += (_, _) => ExitApplication();
 
         var contextMenu = new System.Windows.Forms.ContextMenuStrip();
         contextMenu.Items.Add(openItem);
         contextMenu.Items.Add(pauseItem);
+        contextMenu.Items.Add(checkUpdatesItem);
         contextMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         contextMenu.Items.Add(exitItem);
 
@@ -206,6 +226,31 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         notifyIcon.DoubleClick += (_, _) => RestoreFromTray();
 
         return notifyIcon;
+    }
+
+    /// <summary>The tray menu's "Check for Updates" — same underlying flow as the silent startup check, but reports its outcome via a balloon tip since this one was explicitly requested.</summary>
+    private async Task CheckForUpdatesFromTrayAsync()
+    {
+        var result = await _updateService.CheckAndApplyUpdateAsync();
+
+        // The check can outlive the tray icon: if the user hit Exit while it was in flight, the
+        // icon is already disposed and ShowBalloonTip would throw inside an async-void event
+        // chain — taking the whole process down on its way out.
+        if (_isExiting)
+        {
+            return;
+        }
+
+        var message = result switch
+        {
+            UpdateCheckResult.NotInstalled => "Update checks are only available in an installed copy of Samklang.",
+            UpdateCheckResult.UpToDate => "You're on the latest version.",
+            UpdateCheckResult.CheckFailed => "Couldn't check for updates — try again later.",
+            UpdateCheckResult.UpdateApplied => "Update downloaded — restarting…",
+            _ => string.Empty,
+        };
+
+        _notifyIcon.ShowBalloonTip(4000, "Samklang", message, System.Windows.Forms.ToolTipIcon.Info);
     }
 
     private static System.Drawing.Icon TryGetAppIcon()
@@ -242,7 +287,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var formatLine = _coordinator.AppliedFormat?.ToString() ?? "No format applied";
         var pausedSuffix = _coordinator.IsPaused ? " (switching paused)" : string.Empty;
 
-        var tooltip = $"Samklang{pausedSuffix}\n{trackLine}\n{formatLine}";
+        var tooltip = $"Samklang {VersionInfo.CurrentDisplay}{pausedSuffix}\n{trackLine}\n{formatLine}";
 
         // NotifyIcon.Text throws if longer than 127 characters.
         _notifyIcon.Text = tooltip.Length > 127 ? tooltip[..127] : tooltip;
