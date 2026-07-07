@@ -20,6 +20,14 @@ namespace Samklang;
 ///
 /// Framework-free by design, so this whole pipeline is unit-testable with fakes for all
 /// collaborators, independent of WPF.
+///
+/// Thread safety: the track watcher's events arrive on SMTC/COM callback threads while
+/// <see cref="CheckGracePeriodRevert"/> (the UI poll timer), <see cref="ApplyLateResolution"/>
+/// (Dispatcher-marshaled), and Pause/Resume (tray menu) arrive on the UI thread, so every
+/// state-mutating entry point serializes on <see cref="_gate"/> — this is also what keeps the
+/// reverter's idle bookkeeping single-threaded. <see cref="PropertyChanged"/> is raised while
+/// holding the gate; production subscribers react via <c>Dispatcher.BeginInvoke</c> (never
+/// synchronously on the raising thread), so no subscriber work runs under the lock.
 /// </summary>
 public sealed class TrackSyncCoordinator : INotifyPropertyChanged
 {
@@ -27,6 +35,7 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
     private readonly IFormatResolver _resolver;
     private readonly IDeviceController _deviceController;
     private readonly IRestingFormatReverter _reverter;
+    private readonly object _gate = new();
 
     public TrackSyncCoordinator(
         ITrackWatcher trackWatcher,
@@ -81,25 +90,41 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
     /// <summary>Suppresses format switching until <see cref="Resume"/> is called. Idempotent while already paused.</summary>
     public void Pause()
     {
-        if (IsPaused)
+        lock (_gate)
         {
-            return;
-        }
+            if (IsPaused)
+            {
+                return;
+            }
 
-        IsPaused = true;
-        OnPropertyChanged(nameof(IsPaused));
+            IsPaused = true;
+            OnPropertyChanged(nameof(IsPaused));
+        }
     }
 
-    /// <summary>Resumes format switching after a prior <see cref="Pause"/>. Idempotent while not paused.</summary>
+    /// <summary>
+    /// Resumes format switching after a prior <see cref="Pause"/>, immediately re-resolving and
+    /// applying the current Track's format — a track that started while paused would otherwise
+    /// keep playing at whatever format was left applied until the *next* track change. Idempotent
+    /// while not paused.
+    /// </summary>
     public void Resume()
     {
-        if (!IsPaused)
+        lock (_gate)
         {
-            return;
-        }
+            if (!IsPaused)
+            {
+                return;
+            }
 
-        IsPaused = false;
-        OnPropertyChanged(nameof(IsPaused));
+            IsPaused = false;
+            OnPropertyChanged(nameof(IsPaused));
+
+            if (CurrentTrack is { } track)
+            {
+                ApplyResolution(_resolver.Resolve(track));
+            }
+        }
     }
 
     /// <summary>
@@ -110,11 +135,14 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
     /// </summary>
     public void RefreshDeviceFormat()
     {
-        DeviceFormat = _deviceController.GetCurrentFormat();
-        OnPropertyChanged(nameof(DeviceFormat));
+        lock (_gate)
+        {
+            DeviceFormat = _deviceController.GetCurrentFormat();
+            OnPropertyChanged(nameof(DeviceFormat));
 
-        TargetStatus = _deviceController.GetTargetStatus();
-        OnPropertyChanged(nameof(TargetStatus));
+            TargetStatus = _deviceController.GetTargetStatus();
+            OnPropertyChanged(nameof(TargetStatus));
+        }
     }
 
     /// <summary>
@@ -124,42 +152,48 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
     /// </summary>
     public void CheckGracePeriodRevert()
     {
-        if (!IsPaused)
+        lock (_gate)
         {
-            _reverter.Tick();
-        }
+            if (!IsPaused)
+            {
+                _reverter.Tick();
+            }
 
-        RefreshDeviceFormat();
+            RefreshDeviceFormat();
+        }
     }
 
     private void OnTrackChanged(object? sender, TrackChangedEventArgs e)
     {
-        CurrentTrack = e.Track;
-        OnPropertyChanged(nameof(CurrentTrack));
-
-        if (IsPaused)
+        lock (_gate)
         {
-            // Switching is paused: Current Track keeps updating above (so a tray tooltip stays
-            // live), but resolving/applying a Target Format is suppressed entirely, including the
-            // idle notification below — otherwise a paused idle period would silently queue up a
-            // Grace Period revert that fires the moment Resume() is called.
-            return;
+            CurrentTrack = e.Track;
+            OnPropertyChanged(nameof(CurrentTrack));
+
+            if (IsPaused)
+            {
+                // Switching is paused: Current Track keeps updating above (so a tray tooltip stays
+                // live), but resolving/applying a Target Format is suppressed entirely, including the
+                // idle notification below — otherwise a paused idle period would silently queue up a
+                // Grace Period revert that fires the moment Resume() is called.
+                return;
+            }
+
+            if (e.Track is null)
+            {
+                Resolution = null;
+                OnPropertyChanged(nameof(Resolution));
+                AppliedFormat = null;
+                OnPropertyChanged(nameof(AppliedFormat));
+
+                // No track at all means Apple Music closed (or hasn't been picked up yet), one of
+                // the three idle conditions alongside paused/stopped.
+                _reverter.NotifyIdle();
+                return;
+            }
+
+            ApplyResolution(_resolver.Resolve(e.Track));
         }
-
-        if (e.Track is null)
-        {
-            Resolution = null;
-            OnPropertyChanged(nameof(Resolution));
-            AppliedFormat = null;
-            OnPropertyChanged(nameof(AppliedFormat));
-
-            // No track at all means Apple Music closed (or hasn't been picked up yet), one of
-            // the three idle conditions alongside paused/stopped.
-            _reverter.NotifyIdle();
-            return;
-        }
-
-        ApplyResolution(_resolver.Resolve(e.Track));
     }
 
     /// <summary>
@@ -168,17 +202,22 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
     /// <see cref="Resolver.Catalog.CatalogFormatResolverLayer"/>) timed out and a lower-confidence
     /// layer's result was already applied, but the catalog lookup kept running in the background
     /// and eventually produced an Exact result. Silently ignored if <paramref name="track"/> is no
-    /// longer the current Track (the user has since moved on, so applying it now would be wrong).
-    /// Intended to be wired to such a layer's "late resolution" event from the composition root.
+    /// longer the current Track (the user has since moved on, so applying it now would be wrong),
+    /// or if switching has been paused since the lookup started — "Pause switching" means no
+    /// switch of any kind, including late corrections. Intended to be wired to such a layer's
+    /// "late resolution" event from the composition root.
     /// </summary>
     public void ApplyLateResolution(Track track, FormatResolution resolution)
     {
-        if (CurrentTrack != track)
+        lock (_gate)
         {
-            return;
-        }
+            if (IsPaused || CurrentTrack != track)
+            {
+                return;
+            }
 
-        ApplyResolution(resolution);
+            ApplyResolution(resolution);
+        }
     }
 
     private void ApplyResolution(FormatResolution resolution)
@@ -196,20 +235,23 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
 
     private void OnPlaybackStateChanged(object? sender, PlaybackStateChangedEventArgs e)
     {
-        if (IsPaused)
+        lock (_gate)
         {
-            return;
-        }
+            if (IsPaused)
+            {
+                return;
+            }
 
-        if (e.State == PlaybackState.Playing)
-        {
-            _reverter.NotifyActive();
-        }
-        else
-        {
-            // Paused, Stopped, or null (session gone) are all idle per CONTEXT.md's Grace Period
-            // definition.
-            _reverter.NotifyIdle();
+            if (e.State == PlaybackState.Playing)
+            {
+                _reverter.NotifyActive();
+            }
+            else
+            {
+                // Paused, Stopped, or null (session gone) are all idle per CONTEXT.md's Grace Period
+                // definition.
+                _reverter.NotifyIdle();
+            }
         }
     }
 

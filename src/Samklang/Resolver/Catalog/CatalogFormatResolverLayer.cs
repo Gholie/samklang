@@ -20,8 +20,10 @@ namespace Samklang.Resolver.Catalog;
 /// per-Track result cache, so
 /// <list type="bullet">
 /// <item>duplicate/concurrent calls for the same Track collapse onto one network round trip, and</item>
-/// <item>if the lookup completes after the caller already gave up, the result is cached for the
-/// next <c>TryResolve</c> call for that Track, <i>and</i> pushed out via
+/// <item>if the lookup completes after the caller already gave up, a successful result is cached
+/// for the next <c>TryResolve</c> call for that Track (failures are deliberately not cached —
+/// see <see cref="Finalize"/> — so replaying a track that hit a transient error retries the
+/// catalog instead of being a permanent miss for the session), <i>and</i> pushed out via
 /// <see cref="LateResolutionAvailable"/> so a subscriber (see
 /// <c>TrackSyncCoordinator.ApplyLateResolution</c>) can correct an already-applied
 /// lower-confidence switch to Exact — but only while the same Track is still current.</item>
@@ -46,6 +48,14 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
     public static readonly TimeSpan DefaultBackgroundCeiling = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan TokenRefreshBuffer = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Ceiling on <see cref="_completed"/> so a long-running tray session playing thousands of
+    /// distinct Tracks can't grow the cache forever. Hitting it just clears the cache: entries
+    /// only save one bounded network round trip each, so wholesale eviction is cheap, and anything
+    /// smarter (LRU) isn't worth the bookkeeping here.
+    /// </summary>
+    private const int CompletedCacheCapacity = 512;
+
     private readonly IAppleMusicCatalogClient _client;
     private readonly IStorefrontProvider _storefrontProvider;
     private readonly TimeSpan _resolveTimeout;
@@ -54,14 +64,17 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
 
     private readonly object _gate = new();
     private readonly Dictionary<Track, Task<FormatResolution?>> _inFlight = new();
-    private readonly Dictionary<Track, FormatResolution?> _completed = new();
+    private readonly Dictionary<Track, FormatResolution> _completed = new();
     private AppleMusicToken? _cachedToken;
+
+    // Written from a background lookup thread, read by every TryResolve caller.
+    private volatile bool _isDisabledForSession;
 
     /// <summary>
     /// Set once acquiring a token fails; from then on <see cref="TryResolve"/> returns null
     /// immediately without touching the network again for the rest of the process.
     /// </summary>
-    public bool IsDisabledForSession { get; private set; }
+    public bool IsDisabledForSession => _isDisabledForSession;
 
     public CatalogFormatResolverLayer(
         IAppleMusicCatalogClient client,
@@ -132,7 +145,22 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
         lock (_gate)
         {
             alreadyDelivered = _completed.ContainsKey(track);
-            _completed[track] = result;
+
+            // Only successes are cached. A null result can be a transient failure (network blip,
+            // timeout) just as easily as a genuine catalog miss, and caching it would make one
+            // blip a permanent miss for that Track for the whole session — replaying the track
+            // later should get a fresh try. The retry is bounded the same way every lookup is
+            // (one per TryResolve call, capped at _backgroundCeiling), so this can't run away.
+            if (result is not null)
+            {
+                if (_completed.Count >= CompletedCacheCapacity && !_completed.ContainsKey(track))
+                {
+                    _completed.Clear();
+                }
+
+                _completed[track] = result;
+            }
+
             _inFlight.Remove(track);
         }
 
@@ -155,7 +183,7 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
         {
             // Can't get a token at all — treat as Apple having broken the scrape/amp-api surface
             // for this session (ADR-0001) rather than retrying every track.
-            IsDisabledForSession = true;
+            _isDisabledForSession = true;
             return null;
         }
 
