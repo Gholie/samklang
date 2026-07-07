@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.1](https://github.com/Gholie/samklang/compare/v1.1.0...v1.1.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* **ci:** tag release commit eagerly so release-please detects draft releases ([#34](https://github.com/Gholie/samklang/issues/34)) ([6a4b314](https://github.com/Gholie/samklang/commit/6a4b314ecc00e9643a0a088aae54216915b0c4db)), closes [#32](https://github.com/Gholie/samklang/issues/32)
+* **devices:** probe device rates in exclusive mode with the device's own format layout ([#37](https://github.com/Gholie/samklang/issues/37)) ([dd5b7ab](https://github.com/Gholie/samklang/commit/dd5b7ab55b10ca1966330cdf2e57991313916767)), closes [#31](https://github.com/Gholie/samklang/issues/31)
+* **now-playing:** stop stale artwork reads from overwriting the current track's artwork ([#33](https://github.com/Gholie/samklang/issues/33)) ([a7de6e7](https://github.com/Gholie/samklang/commit/a7de6e7637f01b31ac89e84c81541701d1e74074)), closes [#30](https://github.com/Gholie/samklang/issues/30)
+* **playcache:** recover real codec from encrypted stsd sinf/frma box ([#36](https://github.com/Gholie/samklang/issues/36)) ([0999bfd](https://github.com/Gholie/samklang/commit/0999bfd2ddabf1ef43f70079395b9d7a49bffddb)), closes [#31](https://github.com/Gholie/samklang/issues/31)
+
 ## [1.1.0](https://github.com/Gholie/samklang/compare/v1.0.0...v1.1.0) (2026-07-07)
 
 
