@@ -17,7 +17,7 @@ Windows resamples every app's audio to the device's shared-mode format (the "Def
 ### First run
 
 - Samklang starts minimized to the **system tray** (the icon area near the clock) — there's no window that pops up on first launch. Look for its icon there; hover over it to see a tooltip with the current version, track, and applied format.
-- Left-click (or double-click) the tray icon to open the dashboard window, which shows the current track, its resolved format, confidence, and recent switch history, plus a Settings tab for device targeting, tier mappings, resting format, grace period, and "Start with Windows."
+- Left-click (or double-click) the tray icon to open the dashboard window, which shows the current track — with album artwork, playback controls (previous / play-pause / next), and a subtle playing animation — alongside its resolved format, confidence, and recent switch history, plus a Settings tab for device targeting, tier mappings, resting format, grace period, and "Start with Windows." Prefer a plain text-only dashboard? Untick **Rich now-playing view** in Settings.
 - Nothing needs configuring to get going: open Apple Music, play something, and Samklang picks up the track change and switches your default audio device's format automatically. Use Settings only if you want to pin a specific device, tweak tier→sample-rate mappings, or change the resting format/grace period.
 
 ### What to expect

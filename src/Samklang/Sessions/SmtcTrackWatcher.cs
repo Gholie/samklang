@@ -1,5 +1,6 @@
 using Samklang.Domain;
 using Windows.Media.Control;
+using Windows.Storage.Streams;
 using AppPlaybackState = Samklang.Domain.PlaybackState;
 
 namespace Samklang.Sessions;
@@ -11,12 +12,15 @@ namespace Samklang.Sessions;
 /// to Apple Music for Windows; every other session is discarded by
 /// <see cref="AppleMusicSessionFilter"/>.
 ///
+/// Also implements <see cref="IMediaTransport"/> over the same attached session, since SMTC is
+/// both the source of track metadata/artwork and the channel for previous/play-pause/next.
+///
 /// This class is a thin adapter over a live Windows Runtime API and cannot run outside a real
 /// Windows session with SMTC available, so it is not unit-tested directly.
 /// <see cref="AppleMusicSessionFilter"/> — the only decision logic here — is tested in isolation
 /// instead.
 /// </summary>
-public sealed class SmtcTrackWatcher : ITrackWatcher, IDisposable
+public sealed class SmtcTrackWatcher : ITrackWatcher, IMediaTransport, IDisposable
 {
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private GlobalSystemMediaTransportControlsSession? _attachedSession;
@@ -28,6 +32,10 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IDisposable
     public AppPlaybackState? PlaybackState { get; private set; }
 
     public event EventHandler<PlaybackStateChangedEventArgs>? PlaybackStateChanged;
+
+    public byte[]? ArtworkBytes { get; private set; }
+
+    public event EventHandler? ArtworkChanged;
 
     public async Task StartAsync()
     {
@@ -65,6 +73,7 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IDisposable
         {
             DetachSession();
             SetCurrentTrack(null);
+            SetArtwork(null);
             SetPlaybackState(null);
             return;
         }
@@ -107,12 +116,93 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IDisposable
                 properties.Title ?? string.Empty,
                 properties.Artist ?? string.Empty,
                 properties.AlbumTitle ?? string.Empty));
+            SetArtwork(await TryReadArtworkAsync(properties.Thumbnail));
         }
         catch
         {
             // The session can disappear mid-read (app closing, track skip mid-flight); treat it
             // as "no track" rather than propagating a transient COM failure into the UI.
             SetCurrentTrack(null);
+            SetArtwork(null);
+        }
+    }
+
+    /// <summary>
+    /// Reads the session's thumbnail stream (the album artwork) into encoded image bytes, or null
+    /// when there is no thumbnail or it disappears mid-read — artwork is decoration, so any
+    /// failure here degrades to "no artwork" rather than surfacing an error.
+    /// </summary>
+    private static async Task<byte[]?> TryReadArtworkAsync(IRandomAccessStreamReference? thumbnail)
+    {
+        if (thumbnail is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = await thumbnail.OpenReadAsync();
+            using var reader = new DataReader(stream.GetInputStreamAt(0));
+            var size = (uint)stream.Size;
+            await reader.LoadAsync(size);
+            var bytes = new byte[size];
+            reader.ReadBytes(bytes);
+            return bytes;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public async Task SkipPreviousAsync()
+    {
+        if (_attachedSession is not { } session)
+        {
+            return;
+        }
+
+        try
+        {
+            await session.TrySkipPreviousAsync();
+        }
+        catch
+        {
+            // Session gone mid-call (app closing); the button press just does nothing.
+        }
+    }
+
+    public async Task TogglePlayPauseAsync()
+    {
+        if (_attachedSession is not { } session)
+        {
+            return;
+        }
+
+        try
+        {
+            await session.TryTogglePlayPauseAsync();
+        }
+        catch
+        {
+            // Session gone mid-call (app closing); the button press just does nothing.
+        }
+    }
+
+    public async Task SkipNextAsync()
+    {
+        if (_attachedSession is not { } session)
+        {
+            return;
+        }
+
+        try
+        {
+            await session.TrySkipNextAsync();
+        }
+        catch
+        {
+            // Session gone mid-call (app closing); the button press just does nothing.
         }
     }
 
@@ -155,6 +245,26 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IDisposable
 
         CurrentTrack = track;
         TrackChanged?.Invoke(this, new TrackChangedEventArgs(track));
+    }
+
+    private void SetArtwork(byte[]? bytes)
+    {
+        // Structural comparison, mirroring SetCurrentTrack: Apple Music occasionally re-fires
+        // MediaPropertiesChanged with identical metadata, and re-announcing identical artwork
+        // would make the UI rebuild its bitmap for nothing. Artwork blobs are small (tens of KB),
+        // so the sequence compare is cheap.
+        if (ArtworkBytes is not null && bytes is not null && ArtworkBytes.AsSpan().SequenceEqual(bytes))
+        {
+            return;
+        }
+
+        if (ArtworkBytes is null && bytes is null)
+        {
+            return;
+        }
+
+        ArtworkBytes = bytes;
+        ArtworkChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void SetPlaybackState(AppPlaybackState? state)

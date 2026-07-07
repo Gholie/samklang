@@ -6,6 +6,12 @@ namespace Samklang.SettingsManagement;
 /// The user-configurable knobs persisted as a whole to %APPDATA%\Samklang\settings.json. Kept as
 /// a single flat record so the file is read/written atomically; later issues (tier mappings,
 /// autostart) are expected to add more properties here rather than introduce separate files.
+/// <para>
+/// <paramref name="RichNowPlaying"/> toggles the dashboard's rich now-playing card (album artwork,
+/// playback controls, playing animation) versus a plain text-only line. Defaults to true, which is
+/// also what settings.json files persisted before the property existed deserialize to — missing
+/// JSON properties take the constructor parameter's default.
+/// </para>
 /// </summary>
 public sealed record Settings(
     DeviceFormat RestingFormat,
@@ -13,7 +19,8 @@ public sealed record Settings(
     DeviceTargetingMode DeviceTargetingMode,
     string? PinnedDeviceId,
     string? StorefrontOverride = null,
-    TierSampleRateMapping? TierSampleRates = null)
+    TierSampleRateMapping? TierSampleRates = null,
+    bool RichNowPlaying = true)
 {
     /// <summary>The Grace Period new Settings are seeded with on first run, per docs/PLAN.md.</summary>
     public static readonly TimeSpan DefaultGracePeriod = TimeSpan.FromSeconds(30);

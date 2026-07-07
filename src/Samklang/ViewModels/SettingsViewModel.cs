@@ -34,6 +34,7 @@ public sealed class SettingsViewModel : ViewModelBase
     private string _hiResLosslessHzText = string.Empty;
     private string _dolbyAtmosHzText = string.Empty;
     private bool _startWithWindows;
+    private bool _richNowPlayingEnabled = true;
     private string _statusMessage = string.Empty;
 
     public SettingsViewModel(SettingsManager settingsManager, IDeviceController deviceController, IStartupRegistration startupRegistration)
@@ -136,6 +137,25 @@ public sealed class SettingsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// The rich now-playing toggle (album artwork, playback controls, playing animation vs. a
+    /// plain text line). Applies immediately rather than waiting for <see cref="SaveCommand"/>,
+    /// like <see cref="StartWithWindows"/>, so the dashboard flips the moment it's clicked.
+    /// </summary>
+    public bool RichNowPlayingEnabled
+    {
+        get => _richNowPlayingEnabled;
+        set
+        {
+            if (!SetField(ref _richNowPlayingEnabled, value) || _isLoading)
+            {
+                return;
+            }
+
+            _settingsManager.UpdateRichNowPlaying(value);
+        }
+    }
+
     public string StatusMessage
     {
         get => _statusMessage;
@@ -175,6 +195,8 @@ public sealed class SettingsViewModel : ViewModelBase
             // Start-with-Windows is enabled — see IStartupRegistration — so this reads it live
             // rather than from persisted Settings.
             StartWithWindows = _startupRegistration.IsEnabled;
+
+            RichNowPlayingEnabled = settings.RichNowPlaying;
 
             StatusMessage = string.Empty;
         }
