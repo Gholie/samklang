@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.2](https://github.com/Gholie/samklang/compare/v1.2.1...v1.2.2) (2026-07-08)
+
+
+### Bug Fixes
+
+* **catalog:** split Apple Music's "Artist — Album" SMTC artist field ([#47](https://github.com/Gholie/samklang/issues/47)) ([e2d0811](https://github.com/Gholie/samklang/commit/e2d0811347ec8d234b41ce58753e0a62d904eef8))
+* **tests:** stop dotnet test from polluting the real AppLog file ([#49](https://github.com/Gholie/samklang/issues/49)) ([e506a2f](https://github.com/Gholie/samklang/commit/e506a2ff42926c7a8dd8bdef1e5097e9b875089b))
+
 ## [1.2.1](https://github.com/Gholie/samklang/compare/v1.2.0...v1.2.1) (2026-07-08)
 
 
