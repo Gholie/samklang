@@ -311,6 +311,23 @@ public class CatalogFormatResolverLayerTests
         Assert.Equal(ResolutionConfidence.Exact, second?.Confidence);
     }
 
+    [Theory]
+    [InlineData("", "Artist")] // empty title — e.g. a transient "Connecting…" placeholder
+    [InlineData("Title", "")] // empty artist — SMTC reports this transiently between tracks
+    [InlineData("   ", "Artist")] // whitespace-only normalizes to empty too
+    public void TryResolve_declines_without_searching_when_title_or_artist_is_empty(string title, string artist)
+    {
+        var client = new FakeCatalogClient();
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        var result = layer.TryResolve(new Track(title, artist, "Album"));
+
+        Assert.Null(result);
+        Assert.Equal(0, client.SearchCallCount);
+        // The token can still be fetched (or not) independently of this — the point of the early
+        // decline is specifically to avoid burning a *search* call on an unmatched-able track.
+    }
+
     [Fact]
     public void TryResolve_returns_null_when_no_catalog_candidate_matches_the_track()
     {

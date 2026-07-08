@@ -378,6 +378,17 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
     private async Task<FormatResolution?> ResolveWithTokenAsync(
         Track track, AppleMusicToken token, CancellationToken cancellationToken)
     {
+        // CatalogTrackMatcher would reject every candidate anyway once title or artist normalizes
+        // to empty (a blank/placeholder SMTC read — "Connecting…" with no artist, mid-transition —
+        // is the common case), so decline before spending a search call on a lookup that can never
+        // match.
+        if (CatalogTrackMatcher.Normalize(track.Title).Length == 0 ||
+            CatalogTrackMatcher.Normalize(track.Artist).Length == 0)
+        {
+            AppLog.Info($"Catalog: skipping search for \"{track.Title}\" — {track.Artist} (empty title or artist).");
+            return null;
+        }
+
         var storefront = _storefrontProvider.GetStorefront();
 
         var candidates = await _client.SearchTracksAsync(storefront, token.Value, track, cancellationToken)
@@ -385,7 +396,7 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
         var match = CatalogTrackMatcher.FindBestMatch(track, candidates);
         if (match is null)
         {
-            AppLog.Info($"Catalog: no confident match for \"{track.Title}\" — {track.Artist} ({candidates.Count} search candidate(s)).");
+            AppLog.Info($"Catalog: no confident match for \"{track.Title}\" — {track.Artist} ({candidates.Count} search candidate(s)){DescribeTopCandidates(candidates)}.");
             return null;
         }
 
@@ -495,6 +506,24 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
             // Prefetching is purely opportunistic — any failure (album lookup, manifest, parse,
             // timeout) just means the next track takes the normal lookup path.
         }
+    }
+
+    /// <summary>
+    /// Formats up to 3 of <paramref name="candidates"/> as <c>: "Title" — Artist, "Title" — Artist, ...</c>
+    /// (or an empty string when there are none), so a no-match log line alone is enough to see
+    /// *why* — e.g. an artist field still carrying "Sia — This Is Acting" instead of "Sia" — without
+    /// re-running the search separately. Kept on one line and capped at 3 so a track with dozens of
+    /// candidates doesn't flood the log.
+    /// </summary>
+    private static string DescribeTopCandidates(IReadOnlyList<CatalogSearchCandidate> candidates)
+    {
+        if (candidates.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var summaries = candidates.Take(3).Select(candidate => $"\"{candidate.Title}\" — {candidate.Artist}");
+        return $": {string.Join(", ", summaries)}";
     }
 
     private static int IndexOfTrackId(IReadOnlyList<CatalogSearchCandidate> tracks, string id)

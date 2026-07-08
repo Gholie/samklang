@@ -126,10 +126,14 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IMediaTransport, IDisposab
         try
         {
             var properties = await session.TryGetMediaPropertiesAsync();
-            var track = new Track(
-                properties.Title ?? string.Empty,
-                properties.Artist ?? string.Empty,
-                properties.AlbumTitle ?? string.Empty);
+
+            // Apple Music for Windows packs "Artist — Album" into the Artist field (and leaves
+            // AlbumTitle blank while doing it), which otherwise breaks every catalog match — see
+            // SmtcTrackMetadataParser for the measured evidence and the split rules.
+            var track = SmtcTrackMetadataParser.ParseTrack(
+                properties.Title,
+                properties.Artist,
+                properties.AlbumTitle);
 
             // Apply the track before the (slower) artwork read so downstream consumers — the
             // format-switching pipeline in particular — react as early as before this guard
