@@ -519,4 +519,121 @@ public class TrackSyncCoordinatorTests
         Assert.Equal(0, resolver.CallCount);
         Assert.Null(coordinator.Resolution);
     }
+
+    // --- Transient SMTC state suppression ---
+
+    [Fact]
+    public void TrackChanged_to_a_transient_placeholder_after_a_real_track_changes_nothing()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(SampleResolution());
+        var deviceController = new FakeDeviceController();
+        var reverter = new FakeRestingFormatReverter();
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController, reverter);
+        var realTrack = new Track("Alive", "Sia", "This Is Acting");
+        watcher.Fire(realTrack);
+        var resolutionAfterRealTrack = coordinator.Resolution;
+        var appliedAfterRealTrack = coordinator.AppliedFormat;
+        var lastAppliedTargetAfterRealTrack = deviceController.LastAppliedTarget;
+        var raisedProperties = new List<string>();
+        coordinator.PropertyChanged += (_, e) => raisedProperties.Add(e.PropertyName!);
+
+        // Empty artist — the placeholder shape observed live ("Connecting…", a station name, or
+        // even a real-looking title like "Relax" with no artist).
+        watcher.Fire(new Track("Connecting…", "", ""));
+
+        Assert.Equal(realTrack, coordinator.CurrentTrack);
+        Assert.Equal(1, resolver.CallCount);
+        Assert.Equal(resolutionAfterRealTrack, coordinator.Resolution);
+        Assert.Equal(appliedAfterRealTrack, coordinator.AppliedFormat);
+        Assert.Equal(lastAppliedTargetAfterRealTrack, deviceController.LastAppliedTarget);
+        Assert.DoesNotContain(nameof(TrackSyncCoordinator.CurrentTrack), raisedProperties);
+        Assert.Equal(0, reverter.NotifyIdleCallCount);
+    }
+
+    [Fact]
+    public void TrackChanged_with_a_whitespace_only_title_is_also_treated_as_transient()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(SampleResolution());
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, new FakeDeviceController(), new FakeRestingFormatReverter());
+        var realTrack = new Track("Alive", "Sia", "This Is Acting");
+        watcher.Fire(realTrack);
+
+        watcher.Fire(new Track("   ", "Sia", "This Is Acting"));
+
+        Assert.Equal(realTrack, coordinator.CurrentTrack);
+        Assert.Equal(1, resolver.CallCount);
+    }
+
+    [Fact]
+    public void TrackChanged_to_a_real_track_following_a_transient_placeholder_resolves_and_switches_normally()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(SampleResolution());
+        var deviceController = new FakeDeviceController();
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController, new FakeRestingFormatReverter());
+
+        watcher.Fire(new Track("Connecting…", "", ""));
+        watcher.Fire(new Track("Alive", "Sia", "This Is Acting"));
+
+        Assert.Equal(new Track("Alive", "Sia", "This Is Acting"), coordinator.CurrentTrack);
+        Assert.Equal(1, resolver.CallCount);
+        Assert.Equal(SampleResolution().Target, deviceController.LastAppliedTarget);
+    }
+
+    [Fact]
+    public void TrackChanged_two_step_metadata_arrival_resolves_once_the_complete_update_lands()
+    {
+        // Apple Music sometimes reports a track's title first with an empty artist, then follows
+        // up with the complete metadata a beat later. The first (transient) update must be
+        // ignored, but the second (complete) update must still register as a real change even
+        // though it shares a title with the ignored one — Track equality includes Artist, and
+        // CurrentTrack was never set to the title-only version, so the comparison is against
+        // whatever was current before, not the transient one.
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(SampleResolution());
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, new FakeDeviceController(), new FakeRestingFormatReverter());
+
+        watcher.Fire(new Track("Alive", "", ""));
+        Assert.Null(coordinator.CurrentTrack);
+        Assert.Equal(0, resolver.CallCount);
+
+        watcher.Fire(new Track("Alive", "Sia", "This Is Acting"));
+
+        Assert.Equal(new Track("Alive", "Sia", "This Is Acting"), coordinator.CurrentTrack);
+        Assert.Equal(1, resolver.CallCount);
+    }
+
+    [Fact]
+    public void TrackChanged_to_a_transient_placeholder_as_the_very_first_track_leaves_CurrentTrack_null()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(SampleResolution());
+        var deviceController = new FakeDeviceController();
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, deviceController, new FakeRestingFormatReverter());
+
+        watcher.Fire(new Track("Connecting…", "", ""));
+
+        Assert.Null(coordinator.CurrentTrack);
+        Assert.Equal(0, resolver.CallCount);
+        Assert.Null(coordinator.Resolution);
+        Assert.Null(deviceController.LastAppliedTarget);
+    }
+
+    [Fact]
+    public void TrackChanged_to_null_after_a_real_track_still_notifies_the_reverter_that_playback_is_idle()
+    {
+        // Transient suppression must not leak into the session-closed (null Track) path — that's
+        // still a real idle transition, not a placeholder to ignore.
+        var watcher = new FakeTrackWatcher();
+        var reverter = new FakeRestingFormatReverter();
+        var coordinator = new TrackSyncCoordinator(watcher, new FakeResolver(SampleResolution()), new FakeDeviceController(), reverter);
+
+        watcher.Fire(new Track("Alive", "Sia", "This Is Acting"));
+        watcher.Fire(null);
+
+        Assert.Null(coordinator.CurrentTrack);
+        Assert.Equal(1, reverter.NotifyIdleCallCount);
+    }
 }

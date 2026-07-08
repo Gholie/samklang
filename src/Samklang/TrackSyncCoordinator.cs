@@ -172,6 +172,20 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
     {
         lock (_gate)
         {
+            // SMTC placeholder states ("Connecting…", a station name with no artist, or even a
+            // real-looking title with an empty artist) are not real Track changes — see
+            // TransientTrackDetector. Keep showing whatever was last current (possibly nothing,
+            // if this is the very first update the app has ever seen) through the ~1s gap:
+            // CurrentTrack is left untouched, nothing is resolved, no history entry is appended,
+            // and no device switch happens. This intentionally applies only to media-property
+            // updates carrying placeholder metadata, not to playback-status or session-closed
+            // transitions (e.Track is null for those, which is handled below as before).
+            if (e.Track is { } candidate && TransientTrackDetector.IsTransient(candidate))
+            {
+                AppLog.Info($"Ignoring transient SMTC state \"{candidate.Title}\" — keeping current track.");
+                return;
+            }
+
             CurrentTrack = e.Track;
             OnPropertyChanged(nameof(CurrentTrack));
 
