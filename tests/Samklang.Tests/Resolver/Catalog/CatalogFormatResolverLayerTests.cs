@@ -132,6 +132,39 @@ public class CatalogFormatResolverLayerTests
         Assert.Equal(ResolutionConfidence.Exact, second?.Confidence);
     }
 
+    // SMTC transient states (session attaching, placeholder titles like "Connecting…") report an
+    // empty artist; the matcher can never accept such a Track, so the layer must not spend a
+    // network round trip (or the resolve budget) on it.
+    [Theory]
+    [InlineData("Connecting…", "")] // placeholder title, no artist
+    [InlineData("Focus", "  ")] // whitespace-only artist
+    [InlineData("", "Sia")] // no title
+    public void TryResolve_short_circuits_without_any_network_call_when_title_or_artist_is_empty(
+        string title, string artist)
+    {
+        var client = new FakeCatalogClient();
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        var result = layer.TryResolve(new Track(title, artist, ""));
+
+        Assert.Null(result);
+        Assert.Equal(0, client.FetchTokenCallCount);
+        Assert.Equal(0, client.SearchCallCount);
+    }
+
+    [Fact]
+    public void TryResolve_still_resolves_the_next_complete_track_after_short_circuiting_a_transient_one()
+    {
+        var client = new FakeCatalogClient();
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        Assert.Null(layer.TryResolve(new Track("Connecting…", "", "")));
+        var result = layer.TryResolve(SampleTrack());
+
+        Assert.Equal(ResolutionConfidence.Exact, result?.Confidence);
+        Assert.Equal(1, client.SearchCallCount);
+    }
+
     [Fact]
     public void TryResolve_refetches_the_token_once_the_cached_one_is_within_the_refresh_buffer_of_expiring()
     {

@@ -18,8 +18,9 @@ namespace Samklang.Sessions;
 /// This class is a thin adapter over a live Windows Runtime API and cannot run outside a real
 /// Windows session with SMTC available, so it is not unit-tested directly. Its decision logic
 /// lives in classes tested in isolation instead: <see cref="AppleMusicSessionFilter"/> (which
-/// session to attach) and <see cref="StaleRefreshGuard"/> (which of several overlapping refreshes
-/// may publish its results).
+/// session to attach), <see cref="StaleRefreshGuard"/> (which of several overlapping refreshes
+/// may publish its results), and <see cref="SmtcTrackMetadataParser"/> (how the raw property
+/// strings become a Track).
 /// </summary>
 public sealed class SmtcTrackWatcher : ITrackWatcher, IMediaTransport, IDisposable
 {
@@ -126,10 +127,13 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IMediaTransport, IDisposab
         try
         {
             var properties = await session.TryGetMediaPropertiesAsync();
-            var track = new Track(
-                properties.Title ?? string.Empty,
-                properties.Artist ?? string.Empty,
-                properties.AlbumTitle ?? string.Empty);
+
+            // Apple Music reports Artist as "Artist — Album" (and usually leaves AlbumTitle
+            // empty); the parser undoes that join so the catalog layer sees a clean artist.
+            var track = SmtcTrackMetadataParser.Parse(
+                properties.Title,
+                properties.Artist,
+                properties.AlbumTitle);
 
             // Apply the track before the (slower) artwork read so downstream consumers — the
             // format-switching pipeline in particular — react as early as before this guard
