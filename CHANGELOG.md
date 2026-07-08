@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/Gholie/samklang/compare/v1.1.1...v1.2.0) (2026-07-08)
+
+
+### Features
+
+* **dashboard:** show the current album's tracks instead of the switch log by default ([#43](https://github.com/Gholie/samklang/issues/43)) ([c5b0808](https://github.com/Gholie/samklang/commit/c5b0808a0593480a263b005282eab209006eea61))
+
+
+### Bug Fixes
+
+* **catalog:** validate scraped developer token by decoding, parse media-group manifests ([#40](https://github.com/Gholie/samklang/issues/40)) ([a56fa5f](https://github.com/Gholie/samklang/commit/a56fa5f24f65ede0aee7c5d743ef184da1cd8671)), closes [#31](https://github.com/Gholie/samklang/issues/31)
+* **ui:** restore window chrome with a WPF-UI TitleBar ([#42](https://github.com/Gholie/samklang/issues/42)) ([eeb79d6](https://github.com/Gholie/samklang/commit/eeb79d6c3d75b3a78fd4b962056fad1e75cc8513)), closes [#39](https://github.com/Gholie/samklang/issues/39)
+
 ## [1.1.1](https://github.com/Gholie/samklang/compare/v1.1.0...v1.1.1) (2026-07-07)
 
 
