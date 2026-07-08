@@ -58,17 +58,20 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _settingsManager.LoadOrSeed(TryGetCurrentDeviceFormat(_deviceController));
         _deviceController.SetTargeting(_settingsManager.Current.DeviceTargetingMode, _settingsManager.Current.PinnedDeviceId);
 
-        // Detailed file logging (AppLog) is opt-in via Settings and off by default — sync its
-        // Enabled flag from the loaded value now, before anything else gets a chance to log, and
-        // keep it in sync on every subsequent settings change so toggling it in the Settings page
-        // takes effect immediately rather than after a restart.
+        // Detailed (Info-level) file logging is opt-in via Settings and off by default — sync
+        // AppLog's Enabled flag from the loaded value now, before anything else gets a chance to
+        // log, and keep it in sync on every subsequent settings change so toggling it in the
+        // Settings page takes effect immediately rather than after a restart. Warn/Error always
+        // write regardless of this flag — see AppLog's doc comment.
         AppLog.Enabled = _settingsManager.Current.EnableDetailedLogging;
         _settingsManager.PropertyChanged += (_, _) => AppLog.Enabled = _settingsManager.Current.EnableDetailedLogging;
 
         // 2026-07-08 handoff: the first thing a diagnosable log needs is "did the app even start,
         // and which build" — everything else below is meaningless without this line to anchor a
-        // session in the log file.
-        AppLog.Info($"Samklang starting: {VersionInfo.CurrentDisplay}.", category: "App");
+        // session in the log file. always: true bypasses the EnableDetailedLogging gate (same as
+        // every Warn/Error call, see AppLog's doc comment) — a user who only enables logging after
+        // hitting a problem must still get this anchor line on the run where the problem showed up.
+        AppLog.Info($"Samklang starting: {VersionInfo.CurrentDisplay}.", category: "App", always: true);
 
         _catalogHttpClient = new HttpClient();
         var catalogLayer = new CatalogFormatResolverLayer(

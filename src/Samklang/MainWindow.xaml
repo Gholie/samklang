@@ -442,10 +442,15 @@
                                                 <!-- Title (accented + bold while playing) with artist beneath. -->
                                                 <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,12,0">
                                                     <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold"
-                                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                                                                TextTrimming="CharacterEllipsis">
                                                         <TextBlock.Style>
                                                             <Style TargetType="TextBlock">
+                                                                <!-- Default Foreground is a Setter here, not a local value on the
+                                                                     element above: WPF dependency-property precedence puts local
+                                                                     values above style triggers, so a local Foreground would
+                                                                     permanently beat the IsCurrent trigger below and the accent
+                                                                     highlight would never actually render for the playing row. -->
+                                                                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
                                                                 <Style.Triggers>
                                                                     <DataTrigger Binding="{Binding IsCurrent}" Value="True">
                                                                         <Setter Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
@@ -570,10 +575,12 @@
 
                     <TextBlock Text="Dashboard" FontWeight="Bold" Margin="0,0,0,8" />
                     <StackPanel Margin="0,0,0,16">
-                        <!-- Applies immediately (no Save needed), like the rich now-playing toggle. -->
-                        <CheckBox Content="Show the switch log instead of the album track list"
+                        <!-- Persists immediately (no Save needed), like the rich now-playing toggle, but has no
+                             effect on the dashboard until the next launch — both tabs are always reachable, this
+                             only picks which one is selected on startup. -->
+                        <CheckBox Content="Open on the History tab by default"
                                   IsChecked="{Binding ShowSwitchLogEnabled}" />
-                        <TextBlock Text="The bottom list normally shows the current album's tracks; turn this on for the format-switch history."
+                        <TextBlock Text="The dashboard opens on Playing Next by default; turn this on to open on History (recent format switches) instead. You can switch tabs anytime either way — this only sets the starting tab."
                                    FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                    TextWrapping="Wrap" Margin="28,2,0,0" />
                     </StackPanel>
@@ -583,7 +590,7 @@
                         <!-- Applies immediately (no Save needed), like the other toggles above. Off by default. -->
                         <CheckBox Content="Enable detailed logging"
                                   IsChecked="{Binding EnableDetailedLoggingEnabled}" />
-                        <TextBlock Text="Enable detailed logging to a file for debugging."
+                        <TextBlock Text="Warnings and errors are always written to a log file, even with this off. Turn this on to also capture step-by-step detail for debugging."
                                    FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                    TextWrapping="Wrap" Margin="28,2,0,0" />
                     </StackPanel>

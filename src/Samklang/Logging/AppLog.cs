@@ -12,13 +12,21 @@ namespace Samklang.Logging;
 /// the same root Velopack installs the app under, so it's easy to find alongside it.
 ///
 /// <para>
-/// Gated by <see cref="Enabled"/> (backed by <see cref="SettingsManagement.Settings.EnableDetailedLogging"/>,
-/// off by default): a user only pays the (small) disk-write cost after opting in from the
-/// Settings page, and every call site below stays a no-op until then. The composition root
-/// (<see cref="MainWindow"/>) syncs <see cref="Enabled"/> from Settings once at startup and again
-/// on every settings change, so flipping the toggle takes effect immediately without a restart.
-/// The log directory and file are still not created until the first write that happens while
-/// enabled — lazy by construction, not by a separate initialization step.
+/// <see cref="Info"/> detail is gated by <see cref="Enabled"/> (backed by
+/// <see cref="SettingsManagement.Settings.EnableDetailedLogging"/>, off by default): a user only
+/// pays the (small) disk-write cost of step-by-step tracing after opting in from the Settings
+/// page. <see cref="Warn"/> and <see cref="Error"/> bypass the gate and always write — the whole
+/// point of this class (see above) is that a diagnosis-worthy report is undiagnosable if the user
+/// had to have pre-enabled a toggle before the problem happened, so the lines that actually matter
+/// for that ("something went wrong") can't be opt-in. The single startup anchor line logged from
+/// <see cref="MainWindow"/> is the one <see cref="Info"/> call that also bypasses the gate (via
+/// <c>always: true</c>) for the same reason: it's the line every other line in the file needs in
+/// order to be dated to a build. The composition root (<see cref="MainWindow"/>) syncs
+/// <see cref="Enabled"/> from Settings once at startup and again on every settings change, so
+/// flipping the toggle takes effect immediately without a restart. The log directory and file are
+/// still not created until the first write that actually happens — lazy by construction, not by a
+/// separate initialization step — but that first write is no longer guaranteed to wait for the
+/// toggle now that Warn/Error/the startup line can trigger it on their own.
 /// </para>
 ///
 /// <para>
@@ -77,30 +85,41 @@ public static class AppLog
     internal static bool DisabledForTests { get; set; }
 
     /// <summary>
-    /// Whether file logging is currently turned on, per
+    /// Whether <see cref="Info"/> detail is currently turned on, per
     /// <see cref="SettingsManagement.Settings.EnableDetailedLogging"/>. Defaults to false —
-    /// detailed logging is opt-in — so nothing is written (not even the log directory is created)
-    /// until the composition root syncs this from a loaded/changed Settings value. Every
-    /// <see cref="Write"/> call re-checks this, so toggling it off mid-run stops logging
+    /// detailed logging is opt-in — so no Info line is written until the composition root syncs
+    /// this from a loaded/changed Settings value. Does <i>not</i> gate <see cref="Warn"/> or
+    /// <see cref="Error"/> (see the class doc comment) — those, and the log directory itself, can
+    /// come into existence off the back of a warning/error before this is ever set true. Every
+    /// <see cref="Write"/> call re-checks this, so toggling it off mid-run stops Info logging
     /// immediately without needing to close and reopen any file handle (none is held open between
     /// writes).
     /// </summary>
     public static bool Enabled { get; set; }
 
-    public static void Info(string message, string category = "General") => Write("INFO", category, message);
+    /// <summary>
+    /// Logs step-by-step trace detail. Gated by <see cref="Enabled"/> — a no-op until the user
+    /// opts in from Settings — except when <paramref name="always"/> is set, used only by the
+    /// single startup anchor line in <see cref="MainWindow"/> (see the class doc comment for why
+    /// that one line can't wait for the toggle).
+    /// </summary>
+    public static void Info(string message, string category = "General", bool always = false) =>
+        Write("INFO", category, message, always);
 
-    public static void Warn(string message, string category = "General") => Write("WARN", category, message);
+    /// <summary>Always written regardless of <see cref="Enabled"/> — see the class doc comment.</summary>
+    public static void Warn(string message, string category = "General") => Write("WARN", category, message, always: true);
 
     /// <summary>
     /// Logs an error. <paramref name="exception"/>'s message (never its full ToString/stack trace
-    /// — this is a terse tray-utility log, not a crash dump) is appended when provided.
+    /// — this is a terse tray-utility log, not a crash dump) is appended when provided. Always
+    /// written regardless of <see cref="Enabled"/> — see the class doc comment.
     /// </summary>
     public static void Error(string message, Exception? exception = null, string category = "General") =>
-        Write("ERROR", category, exception is null ? message : $"{message}: {exception.GetType().Name}: {exception.Message}");
+        Write("ERROR", category, exception is null ? message : $"{message}: {exception.GetType().Name}: {exception.Message}", always: true);
 
-    private static void Write(string level, string category, string message)
+    private static void Write(string level, string category, string message, bool always)
     {
-        if (DisabledForTests || !Enabled)
+        if (DisabledForTests || (!always && !Enabled))
         {
             return;
         }

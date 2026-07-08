@@ -107,9 +107,10 @@ public sealed class SettingsManager(ISettingsStore store) : INotifyPropertyChang
 
     /// <summary>
     /// Updates and persists the switch-log toggle (see <see cref="Settings.ShowSwitchLog"/>).
-    /// Applies immediately rather than via <see cref="UpdateFromSettingsView"/>, for the same
-    /// reason as <see cref="UpdateRichNowPlaying"/>: the dashboard swaps between the album track
-    /// list and the switch log the moment the checkbox is clicked.
+    /// Applies immediately rather than via <see cref="UpdateFromSettingsView"/>, for consistency
+    /// with <see cref="UpdateRichNowPlaying"/> and the other immediate-apply toggles — but unlike
+    /// those, this one has no live-visible effect: it only changes which dashboard tab the app
+    /// will open on the *next* startup, per <see cref="Settings.ShowSwitchLog"/>'s doc comment.
     /// </summary>
     public void UpdateShowSwitchLog(bool enabled)
     {
