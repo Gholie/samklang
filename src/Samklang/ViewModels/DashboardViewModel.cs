@@ -107,10 +107,12 @@ public sealed class DashboardViewModel : ViewModelBase
     public ObservableCollection<AlbumTrackEntry> AlbumTracks { get; } = [];
 
     /// <summary>
-    /// Clicking an album-track row plays that exact song. It hands the row's Apple Music catalog id
-    /// to <see cref="IAppleMusicTrackLauncher"/>, which deep-links straight to the track — so it
-    /// works no matter what the queue is (a discovery station, a shuffled playlist, or the album
-    /// itself). This deliberately replaces the original relative-skip walk over
+    /// Clicking an album-track row plays that exact song in its album context. It hands the row's
+    /// Apple Music catalog id (and album id) to <see cref="IAppleMusicTrackLauncher"/>, which
+    /// deep-links straight to the track within the album — so the right song plays no matter what
+    /// the queue is (a discovery station, a shuffled playlist, or the album itself), and playback
+    /// then continues through the rest of that album rather than back to whatever was playing
+    /// before. This deliberately replaces the original relative-skip walk over
     /// <see cref="IMediaTransport"/>: SMTC exposes no "play this track" verb (see docs/CONTEXT.md's
     /// Next Track Buffer note, "SMTC exposes no play queue"), so walking Previous/Next only reached
     /// the right song when the queue *was* this album in album order and landed on an unrelated song
@@ -326,7 +328,8 @@ public sealed class DashboardViewModel : ViewModelBase
             var candidate = _albumCandidates[i];
             AlbumTracks.Add(new AlbumTrackEntry(
                 i + 1, candidate.Title, candidate.Artist,
-                IsCurrent: ReferenceEquals(candidate, current), CatalogId: candidate.Id, Duration: candidate.Duration));
+                IsCurrent: ReferenceEquals(candidate, current), CatalogId: candidate.Id, Duration: candidate.Duration,
+                AlbumId: candidate.AlbumId));
         }
 
         HasAlbumTracks = true;
@@ -358,7 +361,7 @@ public sealed class DashboardViewModel : ViewModelBase
             return;
         }
 
-        await _trackLauncher.PlayTrackAsync(entry.CatalogId);
+        await _trackLauncher.PlayTrackAsync(entry.CatalogId, entry.AlbumId);
     }
 
     private void AppendHistoryEntry(FormatResolution resolution)

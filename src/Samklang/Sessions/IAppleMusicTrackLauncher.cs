@@ -12,8 +12,11 @@ namespace Samklang.Sessions;
 public interface IAppleMusicTrackLauncher
 {
     /// <summary>
-    /// Asks Apple Music to play the catalog track with the given id. Best-effort — a no-op (logged,
-    /// never thrown) when the id is empty or the launch can't be started.
+    /// Asks Apple Music to play the catalog track with the given id, in the context of
+    /// <paramref name="albumId"/> when supplied so playback continues into the rest of that album
+    /// rather than the track in isolation (an empty <paramref name="albumId"/> falls back to a plain
+    /// song link). Best-effort — a no-op (logged, never thrown) when the track id is empty or the
+    /// launch can't be started.
     /// </summary>
-    Task PlayTrackAsync(string catalogTrackId);
+    Task PlayTrackAsync(string catalogTrackId, string albumId);
 }

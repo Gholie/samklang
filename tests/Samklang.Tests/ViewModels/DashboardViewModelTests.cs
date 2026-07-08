@@ -336,9 +336,9 @@ public class DashboardViewModelTests
 
     private static readonly IReadOnlyList<CatalogSearchCandidate> Album =
     [
-        new("id-1", "Track One", "Artist", "Album"),
-        new("id-2", "Track Two", "Artist", "Album"),
-        new("id-3", "Track Three", "Artist", "Album"),
+        new("id-1", "Track One", "Artist", "Album", AlbumId: "album-1"),
+        new("id-2", "Track Two", "Artist", "Album", AlbumId: "album-1"),
+        new("id-3", "Track Three", "Artist", "Album", AlbumId: "album-1"),
     ];
 
     [Fact]
@@ -435,11 +435,11 @@ public class DashboardViewModelTests
 
     private sealed class FakeAppleMusicTrackLauncher : IAppleMusicTrackLauncher
     {
-        public List<string> PlayedCatalogIds { get; } = [];
+        public List<(string CatalogId, string AlbumId)> Played { get; } = [];
 
-        public Task PlayTrackAsync(string catalogTrackId)
+        public Task PlayTrackAsync(string catalogTrackId, string albumId)
         {
-            PlayedCatalogIds.Add(catalogTrackId);
+            Played.Add((catalogTrackId, albumId));
             return Task.CompletedTask;
         }
     }
@@ -455,10 +455,11 @@ public class DashboardViewModelTests
     }
 
     [Fact]
-    public void Clicking_a_track_plays_its_catalog_id_directly()
+    public void Clicking_a_track_plays_it_in_its_album_context()
     {
         // FakeAppleMusicTrackLauncher completes synchronously, so PlayAlbumTrackCommand's
-        // fire-and-forget call (see PlayTrackAsync) runs to completion within Execute.
+        // fire-and-forget call (see PlayTrackAsync) runs to completion within Execute. Both the
+        // song id and its album id are handed over so playback continues through the album.
         var (viewModel, watcher, launcher) = CreateSutWithLauncher();
         watcher.Fire(new Track("Track One", "Artist", "Album"));
         viewModel.OnAlbumTracksAvailable(Album);
@@ -466,7 +467,7 @@ public class DashboardViewModelTests
         var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Three");
         viewModel.PlayAlbumTrackCommand.Execute(target);
 
-        Assert.Equal(["id-3"], launcher.PlayedCatalogIds);
+        Assert.Equal([("id-3", "album-1")], launcher.Played);
     }
 
     [Fact]
@@ -483,7 +484,7 @@ public class DashboardViewModelTests
         var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Two");
         viewModel.PlayAlbumTrackCommand.Execute(target);
 
-        Assert.Equal(["id-2"], launcher.PlayedCatalogIds);
+        Assert.Equal([("id-2", "album-1")], launcher.Played);
     }
 
     [Fact]

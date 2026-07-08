@@ -22,14 +22,14 @@ namespace Samklang.Sessions;
 /// </summary>
 public sealed class AppleMusicUriLauncher(IStorefrontProvider storefrontProvider) : IAppleMusicTrackLauncher
 {
-    public Task PlayTrackAsync(string catalogTrackId)
+    public Task PlayTrackAsync(string catalogTrackId, string albumId)
     {
         if (string.IsNullOrWhiteSpace(catalogTrackId))
         {
             return Task.CompletedTask;
         }
 
-        var url = BuildTrackUrl(storefrontProvider.GetStorefront(), catalogTrackId);
+        var url = BuildTrackUrl(storefrontProvider.GetStorefront(), catalogTrackId, albumId);
         try
         {
             // UseShellExecute routes the URL through the registered protocol handler (the Apple
@@ -45,10 +45,18 @@ public sealed class AppleMusicUriLauncher(IStorefrontProvider storefrontProvider
     }
 
     /// <summary>
-    /// Builds the canonical music.apple.com song URL for a storefront/catalog-id pair. Both parts
-    /// are simple tokens (a two-letter storefront, a numeric id) but are escaped defensively since
-    /// the id ultimately originates from a catalog API response, not our own code.
+    /// Builds the music.apple.com play URL for a track. With an album id, this is the album-context
+    /// form (<c>album/{albumId}?i={songId}</c>) — Apple's own canonical "song" link — so the app
+    /// plays the track and keeps going through the album afterwards. Without one, it falls back to a
+    /// plain <c>song/{songId}</c> link that just plays the track. All parts are simple tokens (a
+    /// two-letter storefront, numeric ids) but are escaped defensively since the ids ultimately
+    /// originate from a catalog API response, not our own code.
     /// </summary>
-    internal static string BuildTrackUrl(string storefront, string catalogTrackId) =>
-        $"https://music.apple.com/{Uri.EscapeDataString(storefront)}/song/{Uri.EscapeDataString(catalogTrackId)}";
+    internal static string BuildTrackUrl(string storefront, string catalogTrackId, string albumId)
+    {
+        var storefrontSegment = Uri.EscapeDataString(storefront);
+        return string.IsNullOrWhiteSpace(albumId)
+            ? $"https://music.apple.com/{storefrontSegment}/song/{Uri.EscapeDataString(catalogTrackId)}"
+            : $"https://music.apple.com/{storefrontSegment}/album/{Uri.EscapeDataString(albumId)}?i={Uri.EscapeDataString(catalogTrackId)}";
+    }
 }
