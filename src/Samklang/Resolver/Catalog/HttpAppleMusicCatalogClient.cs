@@ -1,9 +1,7 @@
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 using Samklang.Domain;
 
 namespace Samklang.Resolver.Catalog;
@@ -17,9 +15,10 @@ namespace Samklang.Resolver.Catalog;
 /// — the same pattern as <see cref="Sessions.SmtcTrackWatcher"/> for the real SMTC API and
 /// <see cref="SettingsManagement.JsonFileSettingsStore"/> for real file I/O. Everything it
 /// produces (matching, manifest parsing, timeout/caching/disable behavior) is tested against
-/// fakes of this interface instead.
+/// fakes of this interface instead, and the token-scraping string logic lives in the pure,
+/// tested <see cref="DeveloperTokenExtractor"/> — only the HTTP plumbing is untested here.
 /// </summary>
-public sealed partial class HttpAppleMusicCatalogClient(HttpClient httpClient) : IAppleMusicCatalogClient
+public sealed class HttpAppleMusicCatalogClient(HttpClient httpClient) : IAppleMusicCatalogClient
 {
     private const string WebPlayerOrigin = "https://music.apple.com";
     private const string ApiBase = "https://amp-api.music.apple.com/v1/catalog";
@@ -28,25 +27,39 @@ public sealed partial class HttpAppleMusicCatalogClient(HttpClient httpClient) :
     {
         var indexHtml = await httpClient.GetStringAsync(WebPlayerOrigin, cancellationToken).ConfigureAwait(false);
 
-        var bundleMatch = IndexBundleScriptRegex().Match(indexHtml);
-        if (!bundleMatch.Success)
+        var bundlePaths = DeveloperTokenExtractor.FindBundlePaths(indexHtml);
+        if (bundlePaths.Count == 0)
         {
             throw new InvalidOperationException("Could not locate the web player's JS bundle reference — Apple may have reworked the page.");
         }
 
-        var bundleUrl = new Uri(new Uri(WebPlayerOrigin), bundleMatch.Groups["src"].Value);
-        var bundleJs = await httpClient.GetStringAsync(bundleUrl, cancellationToken).ConfigureAwait(false);
-
-        var tokenMatch = JwtLiteralRegex().Match(bundleJs);
-        if (!tokenMatch.Success)
+        var bundleJs = await FetchAssetAsync(bundlePaths[0], cancellationToken).ConfigureAwait(false);
+        if (DeveloperTokenExtractor.TryExtractToken(bundleJs) is { } token)
         {
-            throw new InvalidOperationException("Could not locate an embedded developer token in the web player's JS bundle.");
+            return token;
         }
 
-        var token = tokenMatch.Value;
-        var expiresAtUtc = DecodeJwtExpiry(token);
-        return new AppleMusicToken(token, expiresAtUtc);
+        // The index bundle had no valid token. Before giving up (which disables the catalog
+        // layer for the whole session), sweep the other same-origin script assets it references
+        // plus any remaining index bundles — cheap resilience against Apple repackaging the
+        // token into another chunk. Bounded by the caller's cancellation token like every fetch.
+        var fallbackPaths = DeveloperTokenExtractor.FindChunkPaths(bundleJs)
+            .Concat(bundlePaths.Skip(1))
+            .Distinct();
+        foreach (var path in fallbackPaths)
+        {
+            var chunkJs = await FetchAssetAsync(path, cancellationToken).ConfigureAwait(false);
+            if (DeveloperTokenExtractor.TryExtractToken(chunkJs) is { } fallbackToken)
+            {
+                return fallbackToken;
+            }
+        }
+
+        throw new InvalidOperationException("Could not locate an embedded developer token in any of the web player's JS assets.");
     }
+
+    private Task<string> FetchAssetAsync(string path, CancellationToken cancellationToken) =>
+        httpClient.GetStringAsync(new Uri(new Uri(WebPlayerOrigin), path), cancellationToken);
 
     public async Task<IReadOnlyList<CatalogSearchCandidate>> SearchTracksAsync(
         string storefront, string token, Track track, CancellationToken cancellationToken)
@@ -151,37 +164,6 @@ public sealed partial class HttpAppleMusicCatalogClient(HttpClient httpClient) :
         return request;
     }
 
-    /// <summary>Decodes a JWT's unvalidated payload to read its <c>exp</c> claim (seconds since epoch). Signature is not verified — this is a public, anonymous token; we only need its stated expiry.</summary>
-    private static DateTimeOffset DecodeJwtExpiry(string jwt)
-    {
-        var parts = jwt.Split('.');
-        if (parts.Length < 2)
-        {
-            throw new InvalidOperationException("Embedded developer token is not a well-formed JWT.");
-        }
-
-        var payloadJson = Base64UrlDecode(parts[1]);
-        using var document = JsonDocument.Parse(payloadJson);
-        if (!document.RootElement.TryGetProperty("exp", out var expElement))
-        {
-            throw new InvalidOperationException("JWT payload has no 'exp' claim.");
-        }
-
-        return DateTimeOffset.FromUnixTimeSeconds(expElement.GetInt64());
-    }
-
-    private static byte[] Base64UrlDecode(string value)
-    {
-        var padded = value.Replace('-', '+').Replace('_', '/');
-        padded += new string('=', (4 - padded.Length % 4) % 4);
-        return Convert.FromBase64String(padded);
-    }
-
-    [GeneratedRegex("""<script[^>]+src="(?<src>[^"]*assets/index[^"]*\.js)"[^>]*>""", RegexOptions.IgnoreCase)]
-    private static partial Regex IndexBundleScriptRegex();
-
-    [GeneratedRegex(@"eyJhbGciOiJFUzI1NiIsImtpZCI6Ij[\w-]+\.[\w-]+\.[\w-]+")]
-    private static partial Regex JwtLiteralRegex();
 }
 
 internal sealed class SearchResponse
