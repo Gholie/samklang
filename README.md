@@ -4,6 +4,8 @@
 
 **Bit-perfect Apple Music playback on Windows.** *Samklang* (Norwegian: consonance — literally "together-sound") is a Windows 11 tray utility that switches your audio device's format (sample rate + bit depth) to match the track currently playing in **Apple Music for Windows** — so lossless and hi-res tracks play without resampling.
 
+> This is incredibly early days, please do not use yet 🤖
+
 ## Why
 
 Windows resamples every app's audio to the device's shared-mode format (the "Default Format" in the Sound control panel). If that's set to 48 kHz and Apple Music plays a 96 kHz hi-res track, you're not hearing hi-res — you're hearing a resample. This tool watches what's playing and retunes the device so track and device agree.
