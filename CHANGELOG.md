@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.1](https://github.com/Gholie/samklang/compare/v1.2.0...v1.2.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* **catalog:** replace permanent session self-disable with bounded backoff, add file logging ([#45](https://github.com/Gholie/samklang/issues/45)) ([9bd9ecf](https://github.com/Gholie/samklang/commit/9bd9ecf6600e5b16ff2d6ef3a09fc020b33b0f58))
+* **devices:** report the valid bit depth for extensible Device Formats ([#44](https://github.com/Gholie/samklang/issues/44)) ([ceed8bc](https://github.com/Gholie/samklang/commit/ceed8bcdfe9b4b8ee0471d85ca35cc4c30ee62ba))
+
 ## [1.2.0](https://github.com/Gholie/samklang/compare/v1.1.1...v1.2.0) (2026-07-08)
 
 
