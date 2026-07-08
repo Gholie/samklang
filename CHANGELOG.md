@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.3](https://github.com/Gholie/samklang/compare/v1.2.2...v1.2.3) (2026-07-08)
+
+
+### Bug Fixes
+
+* **catalog:** rank matches by album and check same-family editions for quality ([#53](https://github.com/Gholie/samklang/issues/53)) ([20320b6](https://github.com/Gholie/samklang/commit/20320b6855ae117e56b1a34d6eda6045bf28ee9c))
+* **sync:** ignore transient SMTC placeholder states between tracks ([#51](https://github.com/Gholie/samklang/issues/51)) ([93d8654](https://github.com/Gholie/samklang/commit/93d86543cbb68fe5c5aae65aaf0efde77e621472))
+
 ## [1.2.2](https://github.com/Gholie/samklang/compare/v1.2.1...v1.2.2) (2026-07-08)
 
 
