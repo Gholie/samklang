@@ -1,4 +1,5 @@
 using Samklang.Domain;
+using Samklang.Logging;
 
 namespace Samklang.Resolver.Catalog;
 
@@ -50,11 +51,16 @@ namespace Samklang.Resolver.Catalog;
 ///
 /// <para>
 /// <b>Failure handling</b> (ADR-0001: "must degrade gracefully... never hard-fail"). Failing to
-/// obtain a usable token at all is treated as session-fatal — if the anonymous scrape or amp-api
-/// auth is broken, retrying it per-track wastes the resolve budget for nothing, so this layer
-/// disables itself for the rest of the process (a restart retries). Failures further down the
-/// pipeline for one specific Track (search miss, manifest fetch/parse failure, timeout) only fail
-/// that Track; the layer stays enabled and tries again for the next one.
+/// obtain a usable token at all — the anonymous scrape or amp-api auth is broken, or (very
+/// plausibly, per the 2026-07-08 handoff) the app autostarted before the network was up, or
+/// music.apple.com hiccuped once — puts the layer into a cooldown per
+/// <see cref="TokenFailureBackoffSchedule"/> instead of disabling it for the rest of the process:
+/// retrying every single track would waste the resolve budget for nothing, but a fixed, bounded
+/// wait means a transient blip recovers within the session instead of requiring a restart. Each
+/// further consecutive failure grows the cooldown (capped at the schedule's last entry); any
+/// success resets it. Failures further down the pipeline for one specific Track (search miss,
+/// manifest fetch/parse failure, timeout) only fail that Track; the layer stays enabled and tries
+/// again for the next one.
 /// </para>
 /// </summary>
 public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
@@ -62,6 +68,24 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
     public static readonly TimeSpan DefaultResolveTimeout = TimeSpan.FromSeconds(2.5);
     public static readonly TimeSpan DefaultBackgroundCeiling = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan TokenRefreshBuffer = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Cooldown applied after a token-fetch failure, indexed by consecutive-failure count (the
+    /// 1st failure uses index 0, the 2nd index 1, ...) and clamped to the last entry for any
+    /// failure beyond the schedule's length. Short at first, since the most likely real-world
+    /// cause is transient (the app autostarting before the network is up, one bad response from
+    /// Apple's edge) and should clear within a minute; the last step is long enough that a
+    /// genuinely broken scrape (Apple reworked the web player) doesn't hammer music.apple.com
+    /// every track, without ever requiring a restart to recover once the underlying problem
+    /// clears.
+    /// </summary>
+    public static readonly IReadOnlyList<TimeSpan> TokenFailureBackoffSchedule =
+    [
+        TimeSpan.FromSeconds(30),
+        TimeSpan.FromMinutes(2),
+        TimeSpan.FromMinutes(10),
+        TimeSpan.FromMinutes(30),
+    ];
 
     /// <summary>
     /// Ceiling on <see cref="_completed"/> so a long-running tray session playing thousands of
@@ -92,14 +116,28 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
     /// </summary>
     private string? _prefetchAnchorId;
 
-    // Written from a background lookup thread, read by every TryResolve caller.
-    private volatile bool _isDisabledForSession;
+    // Guarded by _gate; written from a background lookup thread, read by every TryResolve caller.
+    private int _consecutiveTokenFailures;
+    private DateTimeOffset? _cooldownUntilUtc;
 
     /// <summary>
-    /// Set once acquiring a token fails; from then on <see cref="TryResolve"/> returns null
-    /// immediately without touching the network again for the rest of the process.
+    /// True while a token-fetch failure's cooldown (see <see cref="TokenFailureBackoffSchedule"/>)
+    /// is still in effect — <see cref="TryResolve"/> returns null immediately without touching the
+    /// network until it elapses. The name predates bounded retry (when this really was a
+    /// permanent, whole-process disable) and is kept for callers/tests already written against
+    /// it, but this is no longer one-way: once the cooldown passes, the next <see cref="TryResolve"/>
+    /// call tries the network again.
     /// </summary>
-    public bool IsDisabledForSession => _isDisabledForSession;
+    public bool IsDisabledForSession
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _cooldownUntilUtc is { } cooldown && _now() < cooldown;
+            }
+        }
+    }
 
     public CatalogFormatResolverLayer(
         IAppleMusicCatalogClient client,
@@ -261,9 +299,9 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
         }
         catch
         {
-            // Can't get a token at all — treat as Apple having broken the scrape/amp-api surface
-            // for this session (ADR-0001) rather than retrying every track.
-            _isDisabledForSession = true;
+            // GetOrRefreshTokenAsync already registered the failure and started the cooldown
+            // (RegisterTokenFailure) before rethrowing — this call just needs to fail gracefully
+            // so the chain falls through to a lower layer for this Track.
             return null;
         }
 
@@ -287,9 +325,54 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
             return current;
         }
 
-        var fetched = await _client.FetchTokenAsync(cancellationToken).ConfigureAwait(false);
-        _cachedToken = fetched;
-        return fetched;
+        AppLog.Info("Catalog: fetching developer token.");
+        try
+        {
+            var fetched = await _client.FetchTokenAsync(cancellationToken).ConfigureAwait(false);
+            _cachedToken = fetched;
+            RegisterTokenSuccess();
+            AppLog.Info($"Catalog: token fetch succeeded (expires {fetched.ExpiresAtUtc:u}).");
+            return fetched;
+        }
+        catch (Exception ex)
+        {
+            RegisterTokenFailure(ex);
+            throw;
+        }
+    }
+
+    /// <summary>Caller must not hold <see cref="_gate"/> (acquires it itself). Resets the failure streak and clears any active cooldown.</summary>
+    private void RegisterTokenSuccess()
+    {
+        int priorFailures;
+        lock (_gate)
+        {
+            priorFailures = _consecutiveTokenFailures;
+            _consecutiveTokenFailures = 0;
+            _cooldownUntilUtc = null;
+        }
+
+        if (priorFailures > 0)
+        {
+            AppLog.Info($"Catalog: token fetch recovered after {priorFailures} consecutive failure(s) — cooldown cleared.");
+        }
+    }
+
+    /// <summary>Caller must not hold <see cref="_gate"/> (acquires it itself). Grows the failure streak and sets a cooldown per <see cref="TokenFailureBackoffSchedule"/>.</summary>
+    private void RegisterTokenFailure(Exception exception)
+    {
+        int failureCount;
+        TimeSpan backoff;
+        lock (_gate)
+        {
+            _consecutiveTokenFailures++;
+            failureCount = _consecutiveTokenFailures;
+            var stepIndex = Math.Min(failureCount, TokenFailureBackoffSchedule.Count) - 1;
+            backoff = TokenFailureBackoffSchedule[stepIndex];
+            _cooldownUntilUtc = _now() + backoff;
+        }
+
+        AppLog.Warn($"Catalog: token fetch failed ({failureCount} consecutive) — cooling down for {backoff}. {exception.GetType().Name}: {exception.Message}");
     }
 
     private async Task<FormatResolution?> ResolveWithTokenAsync(
@@ -302,6 +385,7 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
         var match = CatalogTrackMatcher.FindBestMatch(track, candidates);
         if (match is null)
         {
+            AppLog.Info($"Catalog: no confident match for \"{track.Title}\" — {track.Artist} ({candidates.Count} search candidate(s)).");
             return null;
         }
 
@@ -309,12 +393,14 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
             .ConfigureAwait(false);
         if (manifest is null)
         {
+            AppLog.Info($"Catalog: matched \"{track.Title}\" — {track.Artist} (catalog id {match.Id}) but it has no enhanced-HLS asset.");
             return null;
         }
 
         var format = EnhancedHlsManifestParser.ParseBestLosslessFormat(manifest);
         if (format is null)
         {
+            AppLog.Info($"Catalog: manifest for \"{track.Title}\" — {track.Artist} (catalog id {match.Id}) has no lossless (ALAC) variant.");
             return null;
         }
 

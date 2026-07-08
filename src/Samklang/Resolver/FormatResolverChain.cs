@@ -1,4 +1,5 @@
 using Samklang.Domain;
+using Samklang.Logging;
 
 namespace Samklang.Resolver;
 
@@ -29,6 +30,9 @@ public sealed class FormatResolverChain : IFormatResolver
             var resolution = layer.TryResolve(track);
             if (resolution is not null)
             {
+                AppLog.Info(
+                    $"Resolved \"{track.Title}\" — {track.Artist} via {layer.Name}: " +
+                    $"{resolution.Target.SampleRateHz} Hz / {resolution.Target.BitDepth}-bit ({resolution.Confidence}).");
                 return resolution;
             }
         }

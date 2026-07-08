@@ -158,22 +158,115 @@ public class CatalogFormatResolverLayerTests
     }
 
     [Fact]
-    public void TryResolve_disables_the_layer_for_the_session_after_a_token_fetch_failure_and_never_retries_it()
+    public void TryResolve_enters_a_cooldown_after_a_token_fetch_failure_and_skips_the_network_while_it_is_active()
     {
         var client = new FakeCatalogClient
         {
             FetchTokenImpl = _ => throw new HttpRequestException("scrape failed — Apple likely changed the web player"),
         };
-        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+        var currentTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"), now: () => currentTime);
 
         var first = layer.TryResolve(SampleTrack("Title A"));
         Assert.Null(first);
         Assert.True(layer.IsDisabledForSession);
 
+        // Still well within the first backoff step: a replay must not touch the network again.
+        currentTime += TimeSpan.FromSeconds(5);
         var second = layer.TryResolve(SampleTrack("Title B"));
 
         Assert.Null(second);
+        Assert.True(layer.IsDisabledForSession);
         Assert.Equal(1, client.FetchTokenCallCount);
+    }
+
+    [Fact]
+    public void TryResolve_retries_the_token_fetch_once_the_cooldown_elapses_and_resolves_normally_on_success()
+    {
+        var attempts = 0;
+        var client = new FakeCatalogClient
+        {
+            FetchTokenImpl = _ => ++attempts == 1
+                ? throw new HttpRequestException("transient scrape failure")
+                : Task.FromResult(new AppleMusicToken("token", DateTimeOffset.UtcNow.AddHours(1))),
+        };
+        var currentTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"), now: () => currentTime);
+
+        Assert.Null(layer.TryResolve(SampleTrack("Title A")));
+        Assert.True(layer.IsDisabledForSession);
+
+        // Past the first backoff step (30s): the next call must try the network again.
+        currentTime += CatalogFormatResolverLayer.TokenFailureBackoffSchedule[0] + TimeSpan.FromSeconds(1);
+        var result = layer.TryResolve(SampleTrack("Title B"));
+
+        Assert.Equal(2, client.FetchTokenCallCount);
+        Assert.False(layer.IsDisabledForSession);
+        Assert.Equal(ResolutionConfidence.Exact, result?.Confidence);
+    }
+
+    [Fact]
+    public void Consecutive_token_failures_escalate_the_cooldown_along_the_backoff_schedule()
+    {
+        var client = new FakeCatalogClient
+        {
+            FetchTokenImpl = _ => throw new HttpRequestException("scrape stays broken"),
+        };
+        var currentTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"), now: () => currentTime);
+
+        // First failure: cooldown is the schedule's first step.
+        layer.TryResolve(SampleTrack("Title A"));
+        currentTime += CatalogFormatResolverLayer.TokenFailureBackoffSchedule[0] + TimeSpan.FromSeconds(1);
+        Assert.False(layer.IsDisabledForSession);
+
+        // Second failure: cooldown escalates to the schedule's second step — advancing by only
+        // the *first* step's duration again must still leave it disabled.
+        layer.TryResolve(SampleTrack("Title B"));
+        Assert.True(layer.IsDisabledForSession);
+        currentTime += CatalogFormatResolverLayer.TokenFailureBackoffSchedule[0] + TimeSpan.FromSeconds(1);
+        Assert.True(layer.IsDisabledForSession);
+
+        currentTime += CatalogFormatResolverLayer.TokenFailureBackoffSchedule[1];
+        Assert.False(layer.IsDisabledForSession);
+
+        Assert.Equal(2, client.FetchTokenCallCount);
+    }
+
+    [Fact]
+    public void A_successful_token_fetch_resets_the_failure_streak_so_a_later_failure_uses_the_short_first_step_again()
+    {
+        var shouldFail = true;
+        var currentTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var client = new FakeCatalogClient
+        {
+            // Ties expiry to the fake clock (not real wall-clock time), same as the other
+            // token-refresh tests below — otherwise a real-time expiry never lines up with the
+            // fake time this test advances.
+            FetchTokenImpl = _ => shouldFail
+                ? throw new HttpRequestException("transient")
+                : Task.FromResult(new AppleMusicToken("token", currentTime.AddHours(1))),
+        };
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"), now: () => currentTime);
+
+        // One failure, then let it recover.
+        layer.TryResolve(SampleTrack("Title A"));
+        currentTime += CatalogFormatResolverLayer.TokenFailureBackoffSchedule[0] + TimeSpan.FromSeconds(1);
+        shouldFail = false;
+        var recovered = layer.TryResolve(SampleTrack("Title B"));
+        Assert.Equal(ResolutionConfidence.Exact, recovered?.Confidence);
+        Assert.False(layer.IsDisabledForSession);
+
+        // A fresh failure after the reset must use the schedule's first (short) step again, not
+        // an escalated one — the token is due for refresh again because the fetched token in this
+        // test always expires an hour out, so force a refresh by advancing past that.
+        shouldFail = true;
+        currentTime += TimeSpan.FromHours(1);
+        layer.TryResolve(SampleTrack("Title C"));
+        Assert.True(layer.IsDisabledForSession);
+
+        currentTime += CatalogFormatResolverLayer.TokenFailureBackoffSchedule[0] + TimeSpan.FromSeconds(1);
+        Assert.False(layer.IsDisabledForSession);
     }
 
     [Fact]
