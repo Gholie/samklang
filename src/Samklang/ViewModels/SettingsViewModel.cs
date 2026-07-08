@@ -159,9 +159,11 @@ public sealed class SettingsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Swaps the dashboard's bottom list from the album track list (default) to the noisier
-    /// recent-switches log. Applies immediately rather than waiting for <see cref="SaveCommand"/>,
-    /// like <see cref="RichNowPlayingEnabled"/>, so the dashboard swaps the moment it's clicked.
+    /// Chooses which dashboard tab (Playing Next, the default, or History) is selected the next
+    /// time the app starts — see <see cref="SettingsManagement.Settings.ShowSwitchLog"/>'s doc
+    /// comment. Persists immediately, like <see cref="RichNowPlayingEnabled"/>, but unlike that
+    /// toggle there's nothing for the running dashboard to swap right now: the user can already
+    /// reach both tabs directly, this only affects where they land on the next launch.
     /// </summary>
     public bool ShowSwitchLogEnabled
     {
@@ -178,10 +180,13 @@ public sealed class SettingsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Enables verbose file logging for debugging. Off by default. Applies immediately rather
-    /// than waiting for <see cref="SaveCommand"/>, like <see cref="RichNowPlayingEnabled"/> and
-    /// <see cref="ShowSwitchLogEnabled"/>, so it takes effect the moment it's clicked. The actual
-    /// logging implementation is handled elsewhere; this only persists the toggle.
+    /// Enables verbose Info-level file logging for debugging. Off by default — warnings and
+    /// errors are logged unconditionally regardless of this toggle (see <c>AppLog</c>'s doc
+    /// comment), so this only adds the step-by-step trace detail beneath them. Applies
+    /// immediately rather than waiting for <see cref="SaveCommand"/>, like
+    /// <see cref="RichNowPlayingEnabled"/> and <see cref="ShowSwitchLogEnabled"/>, so it takes
+    /// effect the moment it's clicked. The actual logging implementation is handled elsewhere;
+    /// this only persists the toggle.
     /// </summary>
     public bool EnableDetailedLoggingEnabled
     {

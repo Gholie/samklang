@@ -12,9 +12,9 @@ namespace Samklang.Resolver.Catalog;
 /// <para>
 /// Token candidates are matched with a generic JWT-literal pattern and then <b>validated by
 /// decoding</b> — never by hardcoding a header prefix. Apple changed the token's JWT header once
-/// already (adding <c>"typ":"JWT"</c>, 2026 — see docs/HANDOFF_CATALOG_TOKEN_FIX.md), which
-/// silently disabled the catalog layer for a whole release; matching on decoded content instead
-/// of encoded bytes survives that class of change. The bundle carries more than one real ES256
+/// already (adding <c>"typ":"JWT"</c>, 2026 — fixed in PR #40), which silently disabled the
+/// catalog layer for a whole release; matching on decoded content instead of encoded bytes
+/// survives that class of change. The bundle carries more than one real ES256
 /// JWT (a metrics token alongside the developer token), so candidates with the MusicKit issuer
 /// <c>AMPWebPlay</c> are preferred over merely-plausible ones.
 /// </para>

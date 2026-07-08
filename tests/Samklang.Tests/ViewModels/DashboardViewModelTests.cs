@@ -550,30 +550,29 @@ public class DashboardViewModelTests
     }
 
     [Fact]
-    public void The_switch_log_is_hidden_and_the_album_view_shown_by_default()
+    public void SelectedTabIndex_defaults_to_the_Playing_Next_tab()
     {
         var (viewModel, _, _, _) = CreateSut();
 
-        Assert.False(viewModel.ShowSwitchLog);
-        Assert.True(viewModel.ShowAlbumTracks);
+        Assert.Equal(0, viewModel.SelectedTabIndex);
     }
 
     [Fact]
-    public void The_switch_log_toggle_follows_the_settings_manager_live()
+    public void SelectedTabIndex_seeds_to_the_History_tab_when_show_switch_log_is_enabled_at_startup()
     {
         var watcher = new FakeTrackWatcher();
         var resolver = new FakeResolver(new FormatResolution(new DeviceFormat(44_100, 24), ResolutionConfidence.Fallback, "Tier fallback"));
         var coordinator = new TrackSyncCoordinator(watcher, resolver, new FakeDeviceController(), new FakeRestingFormatReverter());
         var settingsManager = new SettingsManager(new FakeSettingsStore());
         settingsManager.LoadOrSeed(new DeviceFormat(44_100, 24));
-        var viewModel = new DashboardViewModel(coordinator, settingsManager: settingsManager);
-
-        Assert.False(viewModel.ShowSwitchLog);
-
         settingsManager.UpdateShowSwitchLog(true);
 
-        Assert.True(viewModel.ShowSwitchLog);
-        Assert.False(viewModel.ShowAlbumTracks);
+        // ShowSwitchLog only seeds SelectedTabIndex once, in the constructor (see
+        // DashboardViewModel's doc comment) — it is not tracked live, so the setting must already
+        // be true before construction for this to have any effect.
+        var viewModel = new DashboardViewModel(coordinator, settingsManager: settingsManager);
+
+        Assert.Equal(1, viewModel.SelectedTabIndex);
     }
 
     /// <summary>Resolves each distinct Track to a distinct Target Format, so history entries are distinguishable by more than just the track name.</summary>

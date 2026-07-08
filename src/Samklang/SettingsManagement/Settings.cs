@@ -13,9 +13,13 @@ namespace Samklang.SettingsManagement;
 /// JSON properties take the constructor parameter's default.
 /// </para>
 /// <para>
-/// <paramref name="ShowSwitchLog"/> swaps the dashboard's bottom list between the album track
-/// list (default — the switch log was judged too noisy for the everyday view) and the
-/// recent-switches log it replaced.
+/// <paramref name="ShowSwitchLog"/> chooses which dashboard tab (Playing Next — album tracks, the
+/// default; or History — recent switches) is selected on startup. It seeds
+/// <see cref="Samklang.ViewModels.DashboardViewModel.SelectedTabIndex"/> once in that view model's
+/// constructor and is not read again afterward — before the Apple Music-style redesign this
+/// governed a live either/or visibility toggle between two always-present lists, but the
+/// TabControl that replaced them lets the user switch tabs freely, so there is nothing left for
+/// this setting to do after startup beyond picking where they land.
 /// </para>
 /// <para>
 /// <paramref name="EnableDetailedLogging"/> turns on verbose file logging for debugging. Defaults

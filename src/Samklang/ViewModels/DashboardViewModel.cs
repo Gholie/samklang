@@ -67,7 +67,6 @@ public sealed class DashboardViewModel : ViewModelBase
     private bool _isPaused;
     private bool _hasAlbumTracks;
     private string _albumTracksHeader = DefaultAlbumTracksHeader;
-    private bool _showSwitchLog;
     private int _selectedTabIndex;
 
     private const string DefaultAlbumTracksHeader = "Album";
@@ -86,25 +85,22 @@ public sealed class DashboardViewModel : ViewModelBase
         _transport = transport;
 
         _coordinator.PropertyChanged += OnCoordinatorPropertyChanged;
-        if (settingsManager is not null)
-        {
-            settingsManager.PropertyChanged += (_, _) => _uiThreadInvoker(RefreshShowSwitchLog);
-        }
 
         PlayAlbumTrackCommand = new RelayCommand<AlbumTrackEntry>(
             entry => _ = NavigateToTrackAsync(entry),
             CanNavigateToTrack);
 
-        RefreshShowSwitchLog();
         Refresh(appendHistoryEntry: false);
 
         // Seeds the tab the dashboard opens on from the "show switch log by default" setting,
-        // one time only. Deliberately not re-derived inside RefreshShowSwitchLog: that handler
-        // fires on *any* settings change (not just this one), and re-forcing the tab every time
-        // would yank the user back out of a tab they'd manually switched to while just, say,
-        // tweaking the Grace Period. After this initial seed, SelectedTabIndex is purely
-        // user-driven via the TabControl's two-way binding.
-        SelectedTabIndex = _showSwitchLog ? 1 : 0;
+        // one time only, by reading Settings directly rather than keeping a live-tracked property
+        // for it: the redesign replaced the old either/or bottom-list visibility (which used to
+        // need a property that tracked Settings changes live) with a TabControl, and nothing
+        // needs this value again after startup. Re-deriving it on every settings change would also
+        // yank the user back out of a tab they'd manually switched to while just, say, tweaking
+        // the Grace Period. After this initial seed, SelectedTabIndex is purely user-driven via
+        // the TabControl's two-way binding.
+        SelectedTabIndex = (_settingsManager?.Current.ShowSwitchLog ?? false) ? 1 : 0;
     }
 
     /// <summary>Recent Format Resolutions/switches, newest first, trimmed to <see cref="MaxHistoryEntries"/>.</summary>
@@ -112,8 +108,8 @@ public sealed class DashboardViewModel : ViewModelBase
 
     /// <summary>
     /// The current album's tracks in album order, the currently playing one flagged — the
-    /// dashboard's default bottom list (see <see cref="ShowSwitchLog"/>). Populated whenever the
-    /// catalog layer has an album list in hand, cleared when the playing Track stops matching it.
+    /// "Playing Next" tab's content. Populated whenever the catalog layer has an album list in
+    /// hand, cleared when the playing Track stops matching it.
     /// </summary>
     public ObservableCollection<AlbumTrackEntry> AlbumTracks { get; } = [];
 
@@ -150,29 +146,11 @@ public sealed class DashboardViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Mirrors <see cref="Settings.ShowSwitchLog"/> live: true shows the recent-switches log,
-    /// false (the default) shows the album track list instead.
-    /// </summary>
-    public bool ShowSwitchLog
-    {
-        get => _showSwitchLog;
-        private set
-        {
-            if (SetField(ref _showSwitchLog, value))
-            {
-                OnPropertyChanged(nameof(ShowAlbumTracks));
-            }
-        }
-    }
-
-    /// <summary>The complement of <see cref="ShowSwitchLog"/>, so the view can bind both visibilities without an inverting converter.</summary>
-    public bool ShowAlbumTracks => !ShowSwitchLog;
-
-    /// <summary>
     /// Which tab of the "Playing Next" (0) / "History" (1) TabControl is selected — two-way bound
-    /// so the user can switch freely. Seeded once from <see cref="ShowSwitchLog"/> at startup (see
-    /// the constructor) and left alone after that; it does not track <see cref="ShowSwitchLog"/>
-    /// live the way the boolean visibility properties above do.
+    /// so the user can switch freely. Seeded once from <see cref="Settings.ShowSwitchLog"/> at
+    /// startup (see the constructor) and left alone after that; it does not track the Settings
+    /// value live — there is no live-tracked visibility property anymore (the redesign's
+    /// TabControl replaced the either/or bottom list that used to need one).
     /// </summary>
     public int SelectedTabIndex
     {
@@ -429,9 +407,6 @@ public sealed class DashboardViewModel : ViewModelBase
 
         return -1;
     }
-
-    private void RefreshShowSwitchLog() =>
-        ShowSwitchLog = _settingsManager?.Current.ShowSwitchLog ?? false;
 
     private void AppendHistoryEntry(FormatResolution resolution)
     {
