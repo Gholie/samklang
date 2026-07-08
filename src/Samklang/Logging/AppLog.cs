@@ -1,4 +1,7 @@
 using System.IO;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("Samklang.Tests")]
 
 namespace Samklang.Logging;
 
@@ -44,6 +47,20 @@ public static class AppLog
     private static readonly string LogDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Samklang", "logs");
 
+    /// <summary>
+    /// Test-only kill switch, set once for the whole run by Samklang.Tests' <c>[ModuleInitializer]</c>
+    /// (see <c>TestAssemblySetup</c>) before any test executes. CatalogFormatResolverLayer,
+    /// FormatResolverChain, and TrackSyncCoordinator call <see cref="Info"/>/<see cref="Warn"/>/
+    /// <see cref="Error"/> as an ordinary side effect of the production code paths their tests
+    /// exercise; without this, <c>dotnet test</c> would append synthetic entries straight into the
+    /// real user's <c>%LOCALAPPDATA%\Samklang\logs</c> file. Flipping a single bool once, rather
+    /// than redirecting to a per-test temp directory, sidesteps any risk of tests racing each
+    /// other over shared static log state when xunit runs them in parallel — with logging off,
+    /// there is nothing left to race over. Internal rather than public: production code has no
+    /// legitimate reason to ever disable logging.
+    /// </summary>
+    internal static bool DisabledForTests { get; set; }
+
     public static void Info(string message) => Write("INFO", message);
 
     public static void Warn(string message) => Write("WARN", message);
@@ -57,6 +74,11 @@ public static class AppLog
 
     private static void Write(string level, string message)
     {
+        if (DisabledForTests)
+        {
+            return;
+        }
+
         try
         {
             lock (Gate)
