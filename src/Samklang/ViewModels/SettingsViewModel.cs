@@ -36,6 +36,7 @@ public sealed class SettingsViewModel : ViewModelBase
     private bool _startWithWindows;
     private bool _richNowPlayingEnabled = true;
     private bool _showSwitchLogEnabled;
+    private bool _enableDetailedLoggingEnabled;
     private string _statusMessage = string.Empty;
 
     public SettingsViewModel(SettingsManager settingsManager, IDeviceController deviceController, IStartupRegistration startupRegistration)
@@ -176,6 +177,26 @@ public sealed class SettingsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Enables verbose file logging for debugging. Off by default. Applies immediately rather
+    /// than waiting for <see cref="SaveCommand"/>, like <see cref="RichNowPlayingEnabled"/> and
+    /// <see cref="ShowSwitchLogEnabled"/>, so it takes effect the moment it's clicked. The actual
+    /// logging implementation is handled elsewhere; this only persists the toggle.
+    /// </summary>
+    public bool EnableDetailedLoggingEnabled
+    {
+        get => _enableDetailedLoggingEnabled;
+        set
+        {
+            if (!SetField(ref _enableDetailedLoggingEnabled, value) || _isLoading)
+            {
+                return;
+            }
+
+            _settingsManager.UpdateEnableDetailedLogging(value);
+        }
+    }
+
     public string StatusMessage
     {
         get => _statusMessage;
@@ -218,6 +239,7 @@ public sealed class SettingsViewModel : ViewModelBase
 
             RichNowPlayingEnabled = settings.RichNowPlaying;
             ShowSwitchLogEnabled = settings.ShowSwitchLog;
+            EnableDetailedLoggingEnabled = settings.EnableDetailedLogging;
 
             StatusMessage = string.Empty;
         }

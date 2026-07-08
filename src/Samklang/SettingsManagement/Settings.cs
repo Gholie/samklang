@@ -17,6 +17,11 @@ namespace Samklang.SettingsManagement;
 /// list (default — the switch log was judged too noisy for the everyday view) and the
 /// recent-switches log it replaced.
 /// </para>
+/// <para>
+/// <paramref name="EnableDetailedLogging"/> turns on verbose file logging for debugging. Defaults
+/// to false (off) — detailed logging is opt-in — which is also what settings.json files persisted
+/// before the property existed deserialize to.
+/// </para>
 /// </summary>
 public sealed record Settings(
     DeviceFormat RestingFormat,
@@ -26,7 +31,8 @@ public sealed record Settings(
     string? StorefrontOverride = null,
     TierSampleRateMapping? TierSampleRates = null,
     bool RichNowPlaying = true,
-    bool ShowSwitchLog = false)
+    bool ShowSwitchLog = false,
+    bool EnableDetailedLogging = false)
 {
     /// <summary>The Grace Period new Settings are seeded with on first run, per docs/PLAN.md.</summary>
     public static readonly TimeSpan DefaultGracePeriod = TimeSpan.FromSeconds(30);

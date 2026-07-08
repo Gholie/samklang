@@ -47,5 +47,9 @@ public interface IAppleMusicCatalogClient
         string storefront, string catalogTrackId, string token, CancellationToken cancellationToken);
 }
 
-/// <summary>One catalog search result: just enough metadata for <see cref="CatalogTrackMatcher"/> to score it.</summary>
-public sealed record CatalogSearchCandidate(string Id, string Title, string Artist, string Album);
+/// <summary>
+/// One catalog search result: just enough metadata for <see cref="CatalogTrackMatcher"/> to score
+/// it, plus <paramref name="Duration"/> for display in the dashboard's album track list (not used
+/// in matching — null when the catalog response omits it, e.g. older fakes in tests).
+/// </summary>
+public sealed record CatalogSearchCandidate(string Id, string Title, string Artist, string Album, TimeSpan? Duration = null);

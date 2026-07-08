@@ -118,6 +118,18 @@ public sealed class SettingsManager(ISettingsStore store) : INotifyPropertyChang
         OnPropertyChanged(nameof(Current));
     }
 
+    /// <summary>
+    /// Updates and persists the detailed-logging toggle (see <see cref="Settings.EnableDetailedLogging"/>).
+    /// Applies immediately rather than via <see cref="UpdateFromSettingsView"/>, for the same
+    /// reason as <see cref="UpdateRichNowPlaying"/> and <see cref="UpdateShowSwitchLog"/>.
+    /// </summary>
+    public void UpdateEnableDetailedLogging(bool enabled)
+    {
+        Current = Current with { EnableDetailedLogging = enabled };
+        store.Save(Current);
+        OnPropertyChanged(nameof(Current));
+    }
+
     private void OnPropertyChanged(string propertyName) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

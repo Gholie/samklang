@@ -431,6 +431,113 @@ public class DashboardViewModelTests
         Assert.Equal([true, false, false], viewModel.AlbumTracks.Select(entry => entry.IsCurrent));
     }
 
+    // --- Clicking an album track (PlayAlbumTrackCommand) ---
+
+    private sealed class FakeMediaTransport : IMediaTransport
+    {
+        // Only SkipPreviousAsync/SkipNextAsync matter to these tests (navigation), so artwork is
+        // a stub: null with an event this fake never raises. The explicit accessor-only
+        // implementation (rather than a plain field-like event) avoids a CS0067 "never used"
+        // warning for an event this interface requires but these tests don't exercise.
+        public byte[]? ArtworkBytes => null;
+        public event EventHandler? ArtworkChanged { add { } remove { } }
+
+        public List<string> Calls { get; } = [];
+
+        public Task SkipPreviousAsync()
+        {
+            Calls.Add("Previous");
+            return Task.CompletedTask;
+        }
+
+        public Task TogglePlayPauseAsync()
+        {
+            Calls.Add("TogglePlayPause");
+            return Task.CompletedTask;
+        }
+
+        public Task SkipNextAsync()
+        {
+            Calls.Add("Next");
+            return Task.CompletedTask;
+        }
+    }
+
+    private static (DashboardViewModel ViewModel, FakeTrackWatcher Watcher, FakeMediaTransport Transport) CreateSutWithTransport()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(new FormatResolution(new DeviceFormat(44_100, 24), ResolutionConfidence.Fallback, "Tier fallback"));
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, new FakeDeviceController(), new FakeRestingFormatReverter());
+        var transport = new FakeMediaTransport();
+        var viewModel = new DashboardViewModel(coordinator, transport: transport);
+        return (viewModel, watcher, transport);
+    }
+
+    [Fact]
+    public void Clicking_a_later_track_skips_forward_by_the_row_distance()
+    {
+        // FakeMediaTransport's calls all return an already-completed Task, so
+        // PlayAlbumTrackCommand's fire-and-forget async walk (see NavigateToTrackAsync) runs to
+        // completion synchronously within Execute — nothing to await from the test's side.
+        var (viewModel, watcher, transport) = CreateSutWithTransport();
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Three");
+        viewModel.PlayAlbumTrackCommand.Execute(target);
+
+        Assert.Equal(["Next", "Next"], transport.Calls);
+    }
+
+    [Fact]
+    public void Clicking_an_earlier_track_skips_backward_by_the_row_distance()
+    {
+        var (viewModel, watcher, transport) = CreateSutWithTransport();
+        watcher.Fire(new Track("Track Three", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track One");
+        viewModel.PlayAlbumTrackCommand.Execute(target);
+
+        Assert.Equal(["Previous", "Previous"], transport.Calls);
+    }
+
+    [Fact]
+    public void Clicking_the_currently_playing_track_is_disabled()
+    {
+        var (viewModel, watcher, _) = CreateSutWithTransport();
+        watcher.Fire(new Track("Track Two", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        var current = viewModel.AlbumTracks.Single(entry => entry.IsCurrent);
+
+        Assert.False(viewModel.PlayAlbumTrackCommand.CanExecute(current));
+    }
+
+    [Fact]
+    public void Navigation_is_disabled_for_a_null_parameter()
+    {
+        // Guards against a stray CanExecute probe with no CommandParameter bound yet (e.g. WPF's
+        // own CommandManager requery) rather than assuming a row is always supplied.
+        var (viewModel, watcher, _) = CreateSutWithTransport();
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        Assert.False(viewModel.PlayAlbumTrackCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void Navigation_is_disabled_without_a_transport()
+    {
+        var (viewModel, watcher, _, _) = CreateSut();
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Two");
+
+        Assert.False(viewModel.PlayAlbumTrackCommand.CanExecute(target));
+    }
+
     // --- Switch-log toggle ---
 
     private sealed class FakeSettingsStore : ISettingsStore

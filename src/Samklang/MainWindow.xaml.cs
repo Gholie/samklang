@@ -41,11 +41,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         InitializeComponent();
 
-        // 2026-07-08 handoff: the first thing a diagnosable log needs is "did the app even start,
-        // and which build" — everything else below is meaningless without this line to anchor a
-        // session in the log file.
-        AppLog.Info($"Samklang starting: {VersionInfo.CurrentDisplay}.");
-
         // Issue #10: version visible in the UI (also shown in the tray tooltip — see
         // UpdateTrayTooltip) via a single formatting helper, so both stay in sync with the
         // csproj's <Version> without duplicating string formatting.
@@ -62,6 +57,18 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _settingsManager = new SettingsManager(new JsonFileSettingsStore());
         _settingsManager.LoadOrSeed(TryGetCurrentDeviceFormat(_deviceController));
         _deviceController.SetTargeting(_settingsManager.Current.DeviceTargetingMode, _settingsManager.Current.PinnedDeviceId);
+
+        // Detailed file logging (AppLog) is opt-in via Settings and off by default — sync its
+        // Enabled flag from the loaded value now, before anything else gets a chance to log, and
+        // keep it in sync on every subsequent settings change so toggling it in the Settings page
+        // takes effect immediately rather than after a restart.
+        AppLog.Enabled = _settingsManager.Current.EnableDetailedLogging;
+        _settingsManager.PropertyChanged += (_, _) => AppLog.Enabled = _settingsManager.Current.EnableDetailedLogging;
+
+        // 2026-07-08 handoff: the first thing a diagnosable log needs is "did the app even start,
+        // and which build" — everything else below is meaningless without this line to anchor a
+        // session in the log file.
+        AppLog.Info($"Samklang starting: {VersionInfo.CurrentDisplay}.", category: "App");
 
         _catalogHttpClient = new HttpClient();
         var catalogLayer = new CatalogFormatResolverLayer(
@@ -99,8 +106,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // reactions through this window's Dispatcher — required because History is an
         // ObservableCollection a bound ListView enumerates live, which throws if mutated off the
         // UI thread.
+        // _trackWatcher doubles as the IMediaTransport (same SMTC session) — passed here too so
+        // clicking an album track can drive playback (DashboardViewModel.PlayAlbumTrackCommand),
+        // not just for the now-playing card's own transport buttons below.
         var dashboardViewModel = new DashboardViewModel(
-            _coordinator, uiThreadInvoker: action => Dispatcher.BeginInvoke(action), settingsManager: _settingsManager);
+            _coordinator, uiThreadInvoker: action => Dispatcher.BeginInvoke(action), settingsManager: _settingsManager,
+            transport: _trackWatcher);
         var settingsViewModel = new SettingsViewModel(_settingsManager, _deviceController, _startupRegistration);
 
         // The album view rides along on the catalog layer's next-track prefetch — the album list
