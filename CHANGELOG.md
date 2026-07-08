@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0](https://github.com/Gholie/samklang/compare/v1.2.3...v1.3.0) (2026-07-08)
+
+
+### Features
+
+* **logging:** add detailed logging with togglable setting and rolling file rotation ([cabd394](https://github.com/Gholie/samklang/commit/cabd3943cd5bd47e6e4ad11d87bc8459e7055c18))
+* **ui:** redesigned dashboard with Apple Music-style track cards and navigation ([#54](https://github.com/Gholie/samklang/issues/54)) ([cabd394](https://github.com/Gholie/samklang/commit/cabd3943cd5bd47e6e4ad11d87bc8459e7055c18))
+
 ## [1.2.3](https://github.com/Gholie/samklang/compare/v1.2.2...v1.2.3) (2026-07-08)
 
 
