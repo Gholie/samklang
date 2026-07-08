@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.0](https://github.com/Gholie/samklang/compare/v1.3.0...v1.4.0) (2026-07-08)
+
+
+### Features
+
+* **ui:** embed app icon in exe for tray, taskbar and title bar ([#56](https://github.com/Gholie/samklang/issues/56)) ([651bbee](https://github.com/Gholie/samklang/commit/651bbeeac7d85720461caddb083c33e07d582422))
+
+
+### Bug Fixes
+
+* **ui,logging:** address PR [#54](https://github.com/Gholie/samklang/issues/54) review findings ([#57](https://github.com/Gholie/samklang/issues/57)) ([915b101](https://github.com/Gholie/samklang/commit/915b101e2eea3a384c887907f7b25b067bf1484b))
+
 ## [1.3.0](https://github.com/Gholie/samklang/compare/v1.2.3...v1.3.0) (2026-07-08)
 
 
