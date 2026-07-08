@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Threading;
 using Samklang.Devices;
 using Samklang.Domain;
+using Samklang.Logging;
 using Samklang.Resolver;
 using Samklang.Resolver.Catalog;
 using Samklang.Resolver.PlayCache;
@@ -39,6 +40,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     public MainWindow()
     {
         InitializeComponent();
+
+        // 2026-07-08 handoff: the first thing a diagnosable log needs is "did the app even start,
+        // and which build" — everything else below is meaningless without this line to anchor a
+        // session in the log file.
+        AppLog.Info($"Samklang starting: {VersionInfo.CurrentDisplay}.");
 
         // Issue #10: version visible in the UI (also shown in the tray tooltip — see
         // UpdateTrayTooltip) via a single formatting helper, so both stay in sync with the

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Samklang.Devices;
 using Samklang.Domain;
+using Samklang.Logging;
 using Samklang.Resolver;
 using Samklang.Sessions;
 
@@ -236,8 +237,16 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
         var target = resolution.Target with { BitDepth = FallbackFormatResolverLayer.PinnedBitDepth };
 
         var supportedSampleRates = _deviceController.GetSupportedSampleRates(target.BitDepth);
+        var previousAppliedFormat = AppliedFormat;
         AppliedFormat = RateFamilyClamp.Clamp(target, supportedSampleRates);
         OnPropertyChanged(nameof(AppliedFormat));
+
+        if (AppliedFormat != previousAppliedFormat)
+        {
+            AppLog.Info(
+                $"Switching device to {AppliedFormat} for \"{CurrentTrack?.Title}\" " +
+                $"(resolved {resolution.Target} via {resolution.SourceLayer}, {resolution.Confidence}).");
+        }
 
         _deviceController.ApplyTargetFormat(AppliedFormat.Value);
         RefreshDeviceFormat();
