@@ -16,7 +16,12 @@ namespace Samklang.Devices;
 /// </summary>
 public interface IAudioEndpoint
 {
-    /// <summary>The device's current, actual Device Format, or null if it can't be read.</summary>
+    /// <summary>
+    /// The device's current, actual Device Format, or null if it can't be read. The bit depth is
+    /// the audible one (<see cref="WaveFormatBitDepth.Effective"/>) — for a WAVE_FORMAT_EXTENSIBLE
+    /// device (nearly all modern DACs) that's <c>wValidBitsPerSample</c>, not the wider container
+    /// size <c>wBitsPerSample</c> reports.
+    /// </summary>
     DeviceFormat? GetCurrentFormat(string deviceId);
 
     /// <summary>Writes a new shared-mode Device Format to the device.</summary>
