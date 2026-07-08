@@ -13,6 +13,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Samklang</RootNamespace>
     <AssemblyName>Samklang</AssemblyName>
+    <!-- Embedded in the exe; title bar/taskbar/Alt-Tab pick it up automatically, and the tray's
+         Icon.ExtractAssociatedIcon(processPath) finds it instead of SystemIcons.Application.
+         Regenerate from the SVG masters with tools/IconGen — see assets/ICONS.md. -->
+    <ApplicationIcon>..\..\assets\icon.ico</ApplicationIcon>
     <!-- Single source of truth for the app version (issue #10): shown in the tray/UI via
          VersionInfo and embedded in the built assembly. Bumped automatically by release-please's
          release PR (the x-release-please-version marker is what its updater rewrites — see
