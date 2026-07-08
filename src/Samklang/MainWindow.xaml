@@ -342,9 +342,51 @@
                             Title="Switching paused"
                             Message="Formats won't change until you resume from the tray menu." />
 
-                <TextBlock Grid.Row="5" Text="Recent switches" FontWeight="SemiBold" Margin="0,0,0,8" />
+                <!-- The bottom list: the current album's tracks by default (fed by the catalog
+                     layer's prefetch — no extra lookups), or the recent-switches log for users
+                     who re-enable it in Settings ("Show switch log"). Only one is ever visible;
+                     they share the two rows. -->
+                <TextBlock Grid.Row="5" Text="{Binding Dashboard.AlbumTracksHeader}" FontWeight="SemiBold" Margin="0,0,0,8"
+                           Visibility="{Binding Dashboard.ShowAlbumTracks, Converter={StaticResource BoolToVis}}" />
+                <TextBlock Grid.Row="5" Text="Recent switches" FontWeight="SemiBold" Margin="0,0,0,8"
+                           Visibility="{Binding Dashboard.ShowSwitchLog, Converter={StaticResource BoolToVis}}" />
 
-                <ListView Grid.Row="6" ItemsSource="{Binding Dashboard.History}" BorderThickness="0">
+                <Grid Grid.Row="6" Visibility="{Binding Dashboard.ShowAlbumTracks, Converter={StaticResource BoolToVis}}">
+                    <ListView ItemsSource="{Binding Dashboard.AlbumTracks}" BorderThickness="0"
+                              Visibility="{Binding Dashboard.HasAlbumTracks, Converter={StaticResource BoolToVis}}">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="#" DisplayMemberBinding="{Binding Number}" Width="36" />
+                                <GridViewColumn Header="Title" DisplayMemberBinding="{Binding Title}" Width="320" />
+                                <GridViewColumn Header="Artist" DisplayMemberBinding="{Binding Artist}" Width="180" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                    <TextBlock Text="Album tracks appear here once the playing track gets a catalog match."
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" Margin="4,4,0,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Dashboard.HasAlbumTracks}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+
+                <ListView Grid.Row="6" ItemsSource="{Binding Dashboard.History}" BorderThickness="0"
+                          Visibility="{Binding Dashboard.ShowSwitchLog, Converter={StaticResource BoolToVis}}">
                     <ListView.View>
                         <GridView>
                             <GridViewColumn Header="Time" DisplayMemberBinding="{Binding TimestampDisplay}" Width="70" />
@@ -421,6 +463,16 @@
                         <CheckBox Content="Rich now-playing view (album artwork, playback controls, animation)"
                                   IsChecked="{Binding RichNowPlayingEnabled}" />
                         <TextBlock Text="Turn off for a simple text-only dashboard."
+                                   FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   TextWrapping="Wrap" Margin="28,2,0,0" />
+                    </StackPanel>
+
+                    <TextBlock Text="Dashboard" FontWeight="Bold" Margin="0,0,0,8" />
+                    <StackPanel Margin="0,0,0,16">
+                        <!-- Applies immediately (no Save needed), like the rich now-playing toggle. -->
+                        <CheckBox Content="Show the switch log instead of the album track list"
+                                  IsChecked="{Binding ShowSwitchLogEnabled}" />
+                        <TextBlock Text="The bottom list normally shows the current album's tracks; turn this on for the format-switch history."
                                    FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                    TextWrapping="Wrap" Margin="28,2,0,0" />
                     </StackPanel>

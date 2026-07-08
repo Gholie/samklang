@@ -105,6 +105,19 @@ public sealed class SettingsManager(ISettingsStore store) : INotifyPropertyChang
         OnPropertyChanged(nameof(Current));
     }
 
+    /// <summary>
+    /// Updates and persists the switch-log toggle (see <see cref="Settings.ShowSwitchLog"/>).
+    /// Applies immediately rather than via <see cref="UpdateFromSettingsView"/>, for the same
+    /// reason as <see cref="UpdateRichNowPlaying"/>: the dashboard swaps between the album track
+    /// list and the switch log the moment the checkbox is clicked.
+    /// </summary>
+    public void UpdateShowSwitchLog(bool enabled)
+    {
+        Current = Current with { ShowSwitchLog = enabled };
+        store.Save(Current);
+        OnPropertyChanged(nameof(Current));
+    }
+
     private void OnPropertyChanged(string propertyName) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

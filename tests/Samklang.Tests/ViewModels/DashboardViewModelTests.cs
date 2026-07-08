@@ -1,7 +1,9 @@
 using Samklang.Devices;
 using Samklang.Domain;
 using Samklang.Resolver;
+using Samklang.Resolver.Catalog;
 using Samklang.Sessions;
+using Samklang.SettingsManagement;
 using Samklang.Timing;
 using Samklang.ViewModels;
 using Xunit;
@@ -328,6 +330,122 @@ public class DashboardViewModelTests
         }
 
         Assert.Equal("Title — Artist (Album)", viewModel.TrackDisplay);
+    }
+
+    // --- Album track list ---
+
+    private static readonly IReadOnlyList<CatalogSearchCandidate> Album =
+    [
+        new("id-1", "Track One", "Artist", "Album"),
+        new("id-2", "Track Two", "Artist", "Album"),
+        new("id-3", "Track Three", "Artist", "Album"),
+    ];
+
+    [Fact]
+    public void Album_tracks_populate_in_album_order_with_the_playing_track_flagged_current()
+    {
+        var (viewModel, watcher, _, _) = CreateSut();
+        watcher.Fire(new Track("Track Two", "Artist", "Album"));
+
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        Assert.True(viewModel.HasAlbumTracks);
+        Assert.Equal("Album — Album", viewModel.AlbumTracksHeader);
+        Assert.Equal([1, 2, 3], viewModel.AlbumTracks.Select(entry => entry.Number));
+        Assert.Equal(["Track One", "Track Two", "Track Three"], viewModel.AlbumTracks.Select(entry => entry.Title));
+        Assert.Equal([false, true, false], viewModel.AlbumTracks.Select(entry => entry.IsCurrent));
+    }
+
+    [Fact]
+    public void Album_tracks_delivered_before_the_track_change_still_populate_once_the_track_arrives()
+    {
+        // The catalog event and the SMTC track change race; the album must show either way.
+        var (viewModel, watcher, _, _) = CreateSut();
+
+        viewModel.OnAlbumTracksAvailable(Album);
+        Assert.False(viewModel.HasAlbumTracks);
+
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
+
+        Assert.True(viewModel.HasAlbumTracks);
+        Assert.Equal([true, false, false], viewModel.AlbumTracks.Select(entry => entry.IsCurrent));
+    }
+
+    [Fact]
+    public void A_track_change_within_the_same_album_moves_the_current_flag()
+    {
+        var (viewModel, watcher, _, _) = CreateSut();
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        watcher.Fire(new Track("Track Three", "Artist", "Album"));
+
+        Assert.Equal([false, false, true], viewModel.AlbumTracks.Select(entry => entry.IsCurrent));
+    }
+
+    [Fact]
+    public void A_track_change_to_a_song_outside_the_album_clears_the_list()
+    {
+        var (viewModel, watcher, _, _) = CreateSut();
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        watcher.Fire(new Track("Somewhere Else", "Other Artist", "Other Album"));
+
+        Assert.False(viewModel.HasAlbumTracks);
+        Assert.Empty(viewModel.AlbumTracks);
+        Assert.Equal("Album", viewModel.AlbumTracksHeader);
+    }
+
+    [Fact]
+    public void A_null_track_keeps_the_album_list_for_when_playback_resumes()
+    {
+        var (viewModel, watcher, _, _) = CreateSut();
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        watcher.Fire(null);
+
+        Assert.True(viewModel.HasAlbumTracks);
+        Assert.Equal(3, viewModel.AlbumTracks.Count);
+    }
+
+    // --- Switch-log toggle ---
+
+    private sealed class FakeSettingsStore : ISettingsStore
+    {
+        public Settings? Stored { get; set; }
+
+        public Settings? Load() => Stored;
+
+        public void Save(Settings settings) => Stored = settings;
+    }
+
+    [Fact]
+    public void The_switch_log_is_hidden_and_the_album_view_shown_by_default()
+    {
+        var (viewModel, _, _, _) = CreateSut();
+
+        Assert.False(viewModel.ShowSwitchLog);
+        Assert.True(viewModel.ShowAlbumTracks);
+    }
+
+    [Fact]
+    public void The_switch_log_toggle_follows_the_settings_manager_live()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(new FormatResolution(new DeviceFormat(44_100, 24), ResolutionConfidence.Fallback, "Tier fallback"));
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, new FakeDeviceController(), new FakeRestingFormatReverter());
+        var settingsManager = new SettingsManager(new FakeSettingsStore());
+        settingsManager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        var viewModel = new DashboardViewModel(coordinator, settingsManager: settingsManager);
+
+        Assert.False(viewModel.ShowSwitchLog);
+
+        settingsManager.UpdateShowSwitchLog(true);
+
+        Assert.True(viewModel.ShowSwitchLog);
+        Assert.False(viewModel.ShowAlbumTracks);
     }
 
     /// <summary>Resolves each distinct Track to a distinct Target Format, so history entries are distinguishable by more than just the track name.</summary>

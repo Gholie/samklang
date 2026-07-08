@@ -477,4 +477,59 @@ public class CatalogFormatResolverLayerTests
         Assert.Equal(ResolutionConfidence.Exact, second?.Confidence);
         Assert.False(layer.IsDisabledForSession);
     }
+
+    // --- Album track list for the dashboard ---
+
+    [Fact]
+    public void A_successful_resolve_raises_AlbumTracksAvailable_with_the_whole_album_list()
+    {
+        var client = AlbumPlaybackClient();
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        AlbumTracksAvailableEventArgs? albumArgs = null;
+        using var signal = new ManualResetEventSlim(false);
+        layer.AlbumTracksAvailable += (_, args) =>
+        {
+            albumArgs = args;
+            signal.Set();
+        };
+
+        layer.TryResolve(AlbumTrack("Track One"));
+
+        Assert.True(signal.Wait(TimeSpan.FromSeconds(5)), "expected the album track list to be published");
+        Assert.Equal(["id-1", "id-2", "id-3"], albumArgs!.AlbumTracks.Select(track => track.Id));
+    }
+
+    [Fact]
+    public void AlbumTracksAvailable_is_raised_for_the_albums_last_track_even_though_there_is_nothing_left_to_prefetch()
+    {
+        var client = AlbumPlaybackClient();
+        client.SearchImpl = (_, _, track, _) => Task.FromResult<IReadOnlyList<CatalogSearchCandidate>>(
+            [new CatalogSearchCandidate("id-3", track.Title, track.Artist, track.Album)]);
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        using var signal = new ManualResetEventSlim(false);
+        layer.AlbumTracksAvailable += (_, _) => signal.Set();
+
+        layer.TryResolve(AlbumTrack("Track Three"));
+
+        Assert.True(signal.Wait(TimeSpan.FromSeconds(5)), "expected the album track list even at the album's end");
+    }
+
+    [Fact]
+    public void AlbumTracksAvailable_is_not_raised_when_the_album_holds_no_other_songs()
+    {
+        var client = AlbumPlaybackClient();
+        client.AlbumTracksImpl = (_, _, _, _) => Task.FromResult<IReadOnlyList<CatalogSearchCandidate>>(
+            [new CatalogSearchCandidate("id-1", "Track One", "Artist", "Album")]);
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        using var signal = new ManualResetEventSlim(false);
+        layer.AlbumTracksAvailable += (_, _) => signal.Set();
+
+        layer.TryResolve(AlbumTrack("Track One"));
+
+        // A single-track "list" has nothing to show; the event staying silent is the contract.
+        Assert.False(signal.Wait(TimeSpan.FromMilliseconds(750)));
+    }
 }

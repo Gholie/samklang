@@ -93,8 +93,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // reactions through this window's Dispatcher — required because History is an
         // ObservableCollection a bound ListView enumerates live, which throws if mutated off the
         // UI thread.
-        var dashboardViewModel = new DashboardViewModel(_coordinator, uiThreadInvoker: action => Dispatcher.BeginInvoke(action));
+        var dashboardViewModel = new DashboardViewModel(
+            _coordinator, uiThreadInvoker: action => Dispatcher.BeginInvoke(action), settingsManager: _settingsManager);
         var settingsViewModel = new SettingsViewModel(_settingsManager, _deviceController, _startupRegistration);
+
+        // The album view rides along on the catalog layer's next-track prefetch — the album list
+        // is fetched for prediction anyway, so showing it costs no extra lookup. The view model
+        // marshals to the UI thread itself.
+        catalogLayer.AlbumTracksAvailable += (_, args) => dashboardViewModel.OnAlbumTracksAvailable(args.AlbumTracks);
 
         // The watcher doubles as the media transport (both are the same SMTC session) — the
         // now-playing card gets artwork and previous/play-pause/next from it directly, bypassing
