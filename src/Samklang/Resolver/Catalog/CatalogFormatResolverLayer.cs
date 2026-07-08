@@ -179,6 +179,16 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
 
     public FormatResolution? TryResolve(Track track)
     {
+        // SMTC transient states (session attaching, placeholder titles like "Connecting…") carry
+        // an empty artist or title. CatalogTrackMatcher rejects such Tracks unconditionally, so
+        // a search could never produce a match — skip the network round trip entirely rather than
+        // burn the resolve budget on a guaranteed miss.
+        if (string.IsNullOrWhiteSpace(track.Title) || string.IsNullOrWhiteSpace(track.Artist))
+        {
+            LogTransientMetadataSkip(track);
+            return null;
+        }
+
         if (IsDisabledForSession)
         {
             return null;
@@ -231,6 +241,27 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
             TaskScheduler.Default);
 
         return null;
+    }
+
+    /// <summary>
+    /// The last Track whose empty-metadata skip was logged, so SMTC re-firing the same transient
+    /// state (it does, several times per track change) writes one log line instead of spamming.
+    /// </summary>
+    private Track? _lastTransientMetadataSkip;
+
+    private void LogTransientMetadataSkip(Track track)
+    {
+        lock (_gate)
+        {
+            if (_lastTransientMetadataSkip == track)
+            {
+                return;
+            }
+
+            _lastTransientMetadataSkip = track;
+        }
+
+        AppLog.Info($"Catalog: skipping lookup for \"{track.Title}\" — {track.Artist} (empty title/artist is transient SMTC metadata; no search could match).");
     }
 
     private void Finalize(Track track, FormatResolution? result, bool alreadyWaitedOut)
@@ -385,7 +416,12 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
         var match = CatalogTrackMatcher.FindBestMatch(track, candidates);
         if (match is null)
         {
-            AppLog.Info($"Catalog: no confident match for \"{track.Title}\" — {track.Artist} ({candidates.Count} search candidate(s)).");
+            // Include the top few candidates so a mismatch is diagnosable from the log alone —
+            // the 2026-07-08 "Artist — Album" SMTC bug was only findable because the raw strings
+            // happened to appear in this line.
+            var topCandidates = string.Join("; ", candidates.Take(3).Select(c => $"\"{c.Title}\" by {c.Artist}"));
+            var candidatesSuffix = topCandidates.Length > 0 ? $"; top: {topCandidates}" : string.Empty;
+            AppLog.Info($"Catalog: no confident match for \"{track.Title}\" — {track.Artist} ({candidates.Count} search candidate(s){candidatesSuffix}).");
             return null;
         }
 
