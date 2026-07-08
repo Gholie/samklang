@@ -153,7 +153,8 @@ public sealed class HttpAppleMusicCatalogClient(HttpClient httpClient) : IAppleM
             // meaningful next-track predictions.
             .Where(track => track.Type == "songs")
             .Select(track => new CatalogSearchCandidate(
-                track.Id, track.Attributes.Name, track.Attributes.ArtistName, track.Attributes.AlbumName, DurationOf(track.Attributes)))
+                track.Id, track.Attributes.Name, track.Attributes.ArtistName, track.Attributes.AlbumName, DurationOf(track.Attributes),
+                AlbumId: albumId))
             .ToList();
     }
 

@@ -51,5 +51,9 @@ public interface IAppleMusicCatalogClient
 /// One catalog search result: just enough metadata for <see cref="CatalogTrackMatcher"/> to score
 /// it, plus <paramref name="Duration"/> for display in the dashboard's album track list (not used
 /// in matching — null when the catalog response omits it, e.g. older fakes in tests).
+/// <paramref name="AlbumId"/> is the catalog album id the track belongs to — populated only by
+/// <see cref="IAppleMusicCatalogClient.FetchAlbumTracksAsync"/> (where the album is already known),
+/// empty on search-path candidates. It lets the album picker build an album-context play link so
+/// clicking a track continues into the rest of the album rather than playing it in isolation.
 /// </summary>
-public sealed record CatalogSearchCandidate(string Id, string Title, string Artist, string Album, TimeSpan? Duration = null);
+public sealed record CatalogSearchCandidate(string Id, string Title, string Artist, string Album, TimeSpan? Duration = null, string AlbumId = "");

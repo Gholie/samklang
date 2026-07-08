@@ -1,0 +1,14 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- Allow `dotnet restore`/build of our Windows-targeting projects (net8.0-windows*) to run on
+         a non-Windows OS. Without this, the SDK hard-fails with NETSDK1100 the moment it sees a
+         Windows target framework on Linux/macOS. Our own CI builds on windows-latest so this is a
+         no-op there, but GitHub's managed .NET dependency-submission action (the "submit-nuget"
+         check that feeds the dependency graph / security scanning) restores on a Linux runner and
+         needs it. It only gates cross-OS restore/build; it does not change the produced binaries or
+         the Windows build in any way. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+</Project>
