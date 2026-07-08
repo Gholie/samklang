@@ -410,6 +410,27 @@ public class DashboardViewModelTests
         Assert.Equal(3, viewModel.AlbumTracks.Count);
     }
 
+    /// <summary>
+    /// A transient SMTC placeholder (empty artist) between tracks never becomes a Track change at
+    /// the coordinator level (see TrackSyncCoordinator/TransientTrackDetector), so the
+    /// coordinator never raises CurrentTrack's PropertyChanged for it. This locks in the
+    /// consequence for the dashboard: unlike a real track change to a song outside the album
+    /// (which clears the list), the brief "Connecting…"/empty-artist gap between two songs on the
+    /// *same* album must not wipe the album track list out from under the user.
+    /// </summary>
+    [Fact]
+    public void A_transient_placeholder_between_tracks_does_not_clear_the_album_list()
+    {
+        var (viewModel, watcher, _, _) = CreateSut();
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        watcher.Fire(new Track("Connecting…", "", ""));
+
+        Assert.True(viewModel.HasAlbumTracks);
+        Assert.Equal([true, false, false], viewModel.AlbumTracks.Select(entry => entry.IsCurrent));
+    }
+
     // --- Switch-log toggle ---
 
     private sealed class FakeSettingsStore : ISettingsStore
