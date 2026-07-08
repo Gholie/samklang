@@ -227,6 +227,40 @@ public class SettingsManagerTests
     }
 
     [Fact]
+    public void UpdateShowSwitchLog_persists_the_toggle_and_raises_PropertyChanged()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        var raisedCount = 0;
+        manager.PropertyChanged += (_, _) => raisedCount++;
+
+        manager.UpdateShowSwitchLog(true);
+
+        Assert.True(manager.Current.ShowSwitchLog);
+        Assert.Equal(manager.Current, store.Stored);
+        Assert.Equal(1, raisedCount);
+    }
+
+    [Fact]
+    public void UpdateFromSettingsView_leaves_the_switch_log_toggle_untouched()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        manager.UpdateShowSwitchLog(true);
+
+        manager.UpdateFromSettingsView(
+            new DeviceFormat(96_000, 24),
+            TimeSpan.FromSeconds(60),
+            DeviceTargetingMode.FollowDefault,
+            pinnedDeviceId: null,
+            TierSampleRateMapping.Default);
+
+        Assert.True(manager.Current.ShowSwitchLog);
+    }
+
+    [Fact]
     public void UpdateFromSettingsView_leaves_the_rich_now_playing_toggle_untouched()
     {
         var store = new FakeSettingsStore();

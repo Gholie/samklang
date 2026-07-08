@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Samklang.Domain;
+using Samklang.Resolver.Catalog;
+using Samklang.SettingsManagement;
 using Samklang.Timing;
 
 namespace Samklang.ViewModels;
@@ -31,8 +33,17 @@ public sealed class DashboardViewModel : ViewModelBase
     private const string NoTrackDisplay = "(none — waiting for Apple Music)";
 
     private readonly TrackSyncCoordinator _coordinator;
+    private readonly SettingsManager? _settingsManager;
     private readonly IClock _clock;
     private readonly Action<Action> _uiThreadInvoker;
+
+    /// <summary>
+    /// The current album's tracks as last delivered by
+    /// <see cref="CatalogFormatResolverLayer.AlbumTracksAvailable"/> (via
+    /// <see cref="OnAlbumTracksAvailable"/>) — kept in candidate form so track changes can be
+    /// re-matched against it with <see cref="CatalogTrackMatcher"/>.
+    /// </summary>
+    private IReadOnlyList<CatalogSearchCandidate> _albumCandidates = [];
 
     private string _trackDisplay = NoTrackDisplay;
     private string _targetFormatDisplay = "—";
@@ -45,19 +56,75 @@ public sealed class DashboardViewModel : ViewModelBase
     private bool _hasDeviceTargetWarning;
     private string _deviceTargetWarningMessage = string.Empty;
     private bool _isPaused;
+    private bool _hasAlbumTracks;
+    private string _albumTracksHeader = DefaultAlbumTracksHeader;
+    private bool _showSwitchLog;
 
-    public DashboardViewModel(TrackSyncCoordinator coordinator, IClock? clock = null, Action<Action>? uiThreadInvoker = null)
+    private const string DefaultAlbumTracksHeader = "Album";
+
+    public DashboardViewModel(
+        TrackSyncCoordinator coordinator,
+        IClock? clock = null,
+        Action<Action>? uiThreadInvoker = null,
+        SettingsManager? settingsManager = null)
     {
         _coordinator = coordinator;
+        _settingsManager = settingsManager;
         _clock = clock ?? new SystemClock();
         _uiThreadInvoker = uiThreadInvoker ?? (action => action());
 
         _coordinator.PropertyChanged += OnCoordinatorPropertyChanged;
+        if (settingsManager is not null)
+        {
+            settingsManager.PropertyChanged += (_, _) => _uiThreadInvoker(RefreshShowSwitchLog);
+        }
+
+        RefreshShowSwitchLog();
         Refresh(appendHistoryEntry: false);
     }
 
     /// <summary>Recent Format Resolutions/switches, newest first, trimmed to <see cref="MaxHistoryEntries"/>.</summary>
     public ObservableCollection<SwitchHistoryEntry> History { get; } = [];
+
+    /// <summary>
+    /// The current album's tracks in album order, the currently playing one flagged — the
+    /// dashboard's default bottom list (see <see cref="ShowSwitchLog"/>). Populated whenever the
+    /// catalog layer has an album list in hand, cleared when the playing Track stops matching it.
+    /// </summary>
+    public ObservableCollection<AlbumTrackEntry> AlbumTracks { get; } = [];
+
+    /// <summary>True while <see cref="AlbumTracks"/> has content; the album view shows a placeholder hint otherwise.</summary>
+    public bool HasAlbumTracks
+    {
+        get => _hasAlbumTracks;
+        private set => SetField(ref _hasAlbumTracks, value);
+    }
+
+    /// <summary>"Album — &lt;name&gt;" while an album is showing, or a plain "Album" placeholder header.</summary>
+    public string AlbumTracksHeader
+    {
+        get => _albumTracksHeader;
+        private set => SetField(ref _albumTracksHeader, value);
+    }
+
+    /// <summary>
+    /// Mirrors <see cref="Settings.ShowSwitchLog"/> live: true shows the recent-switches log,
+    /// false (the default) shows the album track list instead.
+    /// </summary>
+    public bool ShowSwitchLog
+    {
+        get => _showSwitchLog;
+        private set
+        {
+            if (SetField(ref _showSwitchLog, value))
+            {
+                OnPropertyChanged(nameof(ShowAlbumTracks));
+            }
+        }
+    }
+
+    /// <summary>The complement of <see cref="ShowSwitchLog"/>, so the view can bind both visibilities without an inverting converter.</summary>
+    public bool ShowAlbumTracks => !ShowSwitchLog;
 
     public string TrackDisplay
     {
@@ -131,10 +198,24 @@ public sealed class DashboardViewModel : ViewModelBase
         private set => SetField(ref _isPaused, value);
     }
 
-    private void OnCoordinatorPropertyChanged(object? sender, PropertyChangedEventArgs e) =>
-        _uiThreadInvoker(() => Refresh(appendHistoryEntry: e.PropertyName == nameof(TrackSyncCoordinator.Resolution)));
+    /// <summary>
+    /// Feeds the album view from <see cref="CatalogFormatResolverLayer.AlbumTracksAvailable"/>.
+    /// Safe to call from any thread — like every other reaction it is marshaled through the
+    /// UI-thread invoker before touching <see cref="AlbumTracks"/>.
+    /// </summary>
+    public void OnAlbumTracksAvailable(IReadOnlyList<CatalogSearchCandidate> albumTracks) =>
+        _uiThreadInvoker(() =>
+        {
+            _albumCandidates = albumTracks;
+            RebuildAlbumTracks();
+        });
 
-    private void Refresh(bool appendHistoryEntry)
+    private void OnCoordinatorPropertyChanged(object? sender, PropertyChangedEventArgs e) =>
+        _uiThreadInvoker(() => Refresh(
+            appendHistoryEntry: e.PropertyName == nameof(TrackSyncCoordinator.Resolution),
+            trackChanged: e.PropertyName == nameof(TrackSyncCoordinator.CurrentTrack)));
+
+    private void Refresh(bool appendHistoryEntry, bool trackChanged = false)
     {
         var track = _coordinator.CurrentTrack;
         TrackDisplay = track is null ? NoTrackDisplay : $"{track.Title} — {track.Artist} ({track.Album})";
@@ -182,11 +263,56 @@ public sealed class DashboardViewModel : ViewModelBase
 
         IsPaused = _coordinator.IsPaused;
 
+        if (trackChanged)
+        {
+            RebuildAlbumTracks();
+        }
+
         if (appendHistoryEntry && resolution is not null)
         {
             AppendHistoryEntry(resolution);
         }
     }
+
+    /// <summary>
+    /// Re-derives the album view from <see cref="_albumCandidates"/> and the current Track: the
+    /// matching row (scored by <see cref="CatalogTrackMatcher"/>, the same conservative gate the
+    /// resolver trusts) is flagged as current, and a Track that no longer matches the list at all
+    /// (album jump, shuffle, a track the catalog never matched) clears it — a stale album must
+    /// not linger under an unrelated song. A null Track (playback stopped/paused away) keeps the
+    /// list as-is: resuming the same album is the common case, and a real change re-clears it.
+    /// </summary>
+    private void RebuildAlbumTracks()
+    {
+        var track = _coordinator.CurrentTrack;
+        if (track is null)
+        {
+            return;
+        }
+
+        var current = CatalogTrackMatcher.FindBestMatch(track, _albumCandidates);
+        if (current is null)
+        {
+            _albumCandidates = [];
+            AlbumTracks.Clear();
+            HasAlbumTracks = false;
+            AlbumTracksHeader = DefaultAlbumTracksHeader;
+            return;
+        }
+
+        AlbumTracks.Clear();
+        for (var i = 0; i < _albumCandidates.Count; i++)
+        {
+            var candidate = _albumCandidates[i];
+            AlbumTracks.Add(new AlbumTrackEntry(i + 1, candidate.Title, candidate.Artist, IsCurrent: ReferenceEquals(candidate, current)));
+        }
+
+        HasAlbumTracks = true;
+        AlbumTracksHeader = $"{DefaultAlbumTracksHeader} — {current.Album}";
+    }
+
+    private void RefreshShowSwitchLog() =>
+        ShowSwitchLog = _settingsManager?.Current.ShowSwitchLog ?? false;
 
     private void AppendHistoryEntry(FormatResolution resolution)
     {

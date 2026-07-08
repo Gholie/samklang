@@ -35,6 +35,7 @@ public sealed class SettingsViewModel : ViewModelBase
     private string _dolbyAtmosHzText = string.Empty;
     private bool _startWithWindows;
     private bool _richNowPlayingEnabled = true;
+    private bool _showSwitchLogEnabled;
     private string _statusMessage = string.Empty;
 
     public SettingsViewModel(SettingsManager settingsManager, IDeviceController deviceController, IStartupRegistration startupRegistration)
@@ -156,6 +157,25 @@ public sealed class SettingsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Swaps the dashboard's bottom list from the album track list (default) to the noisier
+    /// recent-switches log. Applies immediately rather than waiting for <see cref="SaveCommand"/>,
+    /// like <see cref="RichNowPlayingEnabled"/>, so the dashboard swaps the moment it's clicked.
+    /// </summary>
+    public bool ShowSwitchLogEnabled
+    {
+        get => _showSwitchLogEnabled;
+        set
+        {
+            if (!SetField(ref _showSwitchLogEnabled, value) || _isLoading)
+            {
+                return;
+            }
+
+            _settingsManager.UpdateShowSwitchLog(value);
+        }
+    }
+
     public string StatusMessage
     {
         get => _statusMessage;
@@ -197,6 +217,7 @@ public sealed class SettingsViewModel : ViewModelBase
             StartWithWindows = _startupRegistration.IsEnabled;
 
             RichNowPlayingEnabled = settings.RichNowPlaying;
+            ShowSwitchLogEnabled = settings.ShowSwitchLog;
 
             StatusMessage = string.Empty;
         }

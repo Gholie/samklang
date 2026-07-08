@@ -131,6 +131,14 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
     /// </summary>
     public event EventHandler<NextTrackPrefetchedEventArgs>? NextTrackPrefetched;
 
+    /// <summary>
+    /// Raised when the current Track's album track list is in hand (fetched — or reused from the
+    /// prefetch buffer — for next-track prediction anyway) and it holds more than just the
+    /// current track. Lets the dashboard show the album's other songs without any lookup of its
+    /// own. Fires from the background prefetch thread; subscribers marshal to the UI themselves.
+    /// </summary>
+    public event EventHandler<AlbumTracksAvailableEventArgs>? AlbumTracksAvailable;
+
     public FormatResolution? TryResolve(Track track)
     {
         if (IsDisabledForSession)
@@ -355,6 +363,15 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
                 .ConfigureAwait(false);
 
             var currentIndex = IndexOfTrackId(albumTracks, currentCatalogTrackId);
+
+            // The album list is a dashboard-worthy byproduct even when there's nothing left to
+            // predict from it (e.g. the album's last track) — but only when the anchor is
+            // actually in it (a list without it is suspect) and it has other songs to show.
+            if (currentIndex >= 0 && albumTracks.Count > 1)
+            {
+                AlbumTracksAvailable?.Invoke(this, new AlbumTracksAvailableEventArgs(albumTracks));
+            }
+
             if (currentIndex < 0 || currentIndex + 1 >= albumTracks.Count)
             {
                 return; // last album track (or not found at all) — nothing to predict
@@ -424,3 +441,6 @@ public sealed record LateResolutionEventArgs(Track Track, FormatResolution Resol
 
 /// <summary>The predicted next track (an album-order prediction, since SMTC exposes no play queue) whose Format Resolution is now buffered and ready.</summary>
 public sealed record NextTrackPrefetchedEventArgs(CatalogSearchCandidate NextTrack, FormatResolution Resolution);
+
+/// <summary>The current Track's album track list, in album order, as fetched for next-track prediction — the dashboard's album view feeds off this.</summary>
+public sealed record AlbumTracksAvailableEventArgs(IReadOnlyList<CatalogSearchCandidate> AlbumTracks);
