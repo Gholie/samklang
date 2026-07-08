@@ -444,6 +444,121 @@ public class CatalogFormatResolverLayerTests
         searchTcs.SetResult([new CatalogSearchCandidate("id-1", track.Title, track.Artist, track.Album)]);
     }
 
+    // --- Album-family sibling quality check (2026-07-08 Sia "Alive" investigation: Apple can
+    // carry the same song under several editions of the same album with different masters, and
+    // CatalogTrackMatcher's ranking alone can tie those editions together without picking the
+    // better one — this layer fetches every tied sibling's manifest and keeps the best). ---
+
+    private static IReadOnlyList<CatalogSearchCandidate> PlainAndDeluxeCandidates(Track track) =>
+    [
+        new CatalogSearchCandidate("plain", track.Title, track.Artist, track.Album),
+        new CatalogSearchCandidate("deluxe", track.Title, track.Artist, $"{track.Album} (Deluxe Version)"),
+    ];
+
+    [Fact]
+    public void TryResolve_fetches_only_one_manifest_when_no_same_album_family_sibling_exists()
+    {
+        var client = new FakeCatalogClient(); // default SearchImpl returns a single candidate
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        layer.TryResolve(SampleTrack());
+
+        Assert.Equal(1, client.ManifestCallCount);
+    }
+
+    [Fact]
+    public void TryResolve_prefers_a_higher_quality_sibling_edition_over_the_initially_ranked_match()
+    {
+        var client = new FakeCatalogClient
+        {
+            SearchImpl = (_, _, track, _) => Task.FromResult(PlainAndDeluxeCandidates(track)),
+            ManifestImpl = (_, catalogTrackId, _, _) =>
+                Task.FromResult<string?>(catalogTrackId == "deluxe" ? HiResManifest : DefaultManifest),
+        };
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        var result = layer.TryResolve(SampleTrack());
+
+        Assert.Equal(new DeviceFormat(192_000, 24), result!.Target);
+        Assert.Equal(ResolutionConfidence.Exact, result.Confidence);
+        Assert.True(result.IsLossless);
+        Assert.Equal(2, client.ManifestCallCount); // the matched candidate, then the one sibling
+    }
+
+    [Fact]
+    public void TryResolve_keeps_the_initially_ranked_match_when_no_sibling_has_a_better_quality_manifest()
+    {
+        var client = new FakeCatalogClient
+        {
+            // Both editions serve the same manifest — nothing to promote.
+            SearchImpl = (_, _, track, _) => Task.FromResult(PlainAndDeluxeCandidates(track)),
+        };
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        var result = layer.TryResolve(SampleTrack());
+
+        Assert.Equal(new DeviceFormat(96_000, 24), result!.Target);
+        Assert.Equal(2, client.ManifestCallCount);
+    }
+
+    [Fact]
+    public void TryResolve_ignores_a_sibling_whose_manifest_fetch_yields_no_asset_and_keeps_the_matched_result()
+    {
+        var client = new FakeCatalogClient
+        {
+            SearchImpl = (_, _, track, _) => Task.FromResult(PlainAndDeluxeCandidates(track)),
+            ManifestImpl = (_, catalogTrackId, _, _) =>
+                catalogTrackId == "deluxe" ? Task.FromResult<string?>(null) : Task.FromResult<string?>(DefaultManifest),
+        };
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        var result = layer.TryResolve(SampleTrack());
+
+        Assert.Equal(new DeviceFormat(96_000, 24), result!.Target);
+    }
+
+    [Fact]
+    public void TryResolve_anchors_the_next_track_prefetch_on_the_winning_sibling_not_the_initially_ranked_match()
+    {
+        using var signal = new ManualResetEventSlim(false);
+        var client = new FakeCatalogClient
+        {
+            SearchImpl = (_, _, track, _) => Task.FromResult(PlainAndDeluxeCandidates(track)),
+            ManifestImpl = (_, catalogTrackId, _, _) =>
+                Task.FromResult<string?>(catalogTrackId == "deluxe" ? HiResManifest : DefaultManifest),
+            AlbumTracksImpl = (_, _, _, _) =>
+            {
+                signal.Set();
+                return Task.FromResult<IReadOnlyList<CatalogSearchCandidate>>([]);
+            },
+        };
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        layer.TryResolve(SampleTrack());
+
+        Assert.True(signal.Wait(TimeSpan.FromSeconds(5)), "expected the next-track prefetch to kick off");
+        Assert.Equal("deluxe", client.LastAlbumTracksTrackId);
+    }
+
+    [Fact]
+    public void TryResolve_returns_null_when_neither_the_match_nor_any_sibling_has_a_lossless_variant()
+    {
+        var client = new FakeCatalogClient
+        {
+            SearchImpl = (_, _, track, _) => Task.FromResult(PlainAndDeluxeCandidates(track)),
+            ManifestImpl = (_, _, _, _) => Task.FromResult<string?>("""
+                #EXTM3U
+                #EXT-X-STREAM-INF:AUDIO-FORMAT="he-aac",CODECS="mp4a.40.2"
+                audio.m3u8
+                """),
+        };
+        var layer = new CatalogFormatResolverLayer(client, new FakeStorefrontProvider("us"));
+
+        var result = layer.TryResolve(SampleTrack());
+
+        Assert.Null(result);
+    }
+
     // --- Next-track prefetch buffer ---
 
     private const string HiResManifest = """
