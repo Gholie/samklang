@@ -2,7 +2,7 @@ namespace Samklang.Domain;
 
 /// <summary>
 /// The pure "what do we actually switch to" policy behind capability clamping: given a requested
-/// sample rate and the set of sample rates the target device actually supports in shared mode,
+/// sample rate and the set of sample rates the target device's driver actually supports,
 /// picks the requested rate when the device supports it outright, otherwise the highest supported
 /// rate in the same rate family (44.1k vs 48k multiples) — crossing to the other family only when
 /// the requested family has no supported rate at all.
