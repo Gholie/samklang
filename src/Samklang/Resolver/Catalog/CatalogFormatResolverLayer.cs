@@ -425,31 +425,58 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
             return null;
         }
 
-        var manifest = await _client.FetchEnhancedHlsManifestAsync(storefront, match.Id, token.Value, cancellationToken)
-            .ConfigureAwait(false);
-        if (manifest is null)
+        // The matched candidate isn't necessarily the best-quality one: Apple often carries the
+        // same song across several editions of the same album (standard vs. "Deluxe"/"Anniversary
+        // Edition") with different masters — see CatalogTrackMatcher's class doc for the "Alive"
+        // case that motivated this. Check the matched candidate's manifest first (the common case,
+        // and the only fetch when there are no siblings), then any same-album-family siblings, and
+        // keep whichever asset is actually the highest quality. Bounded by how many same-family
+        // editions Apple's own search surfaced in the top 10 — typically zero or one extra.
+        var winner = match;
+        var winningFormat = await FetchLosslessFormatAsync(storefront, match, token, cancellationToken).ConfigureAwait(false);
+
+        foreach (var sibling in CatalogTrackMatcher.FindAlbumSiblings(track, candidates, match))
         {
-            AppLog.Info($"Catalog: matched \"{track.Title}\" — {track.Artist} (catalog id {match.Id}) but it has no enhanced-HLS asset.");
+            var siblingFormat = await FetchLosslessFormatAsync(storefront, sibling, token, cancellationToken).ConfigureAwait(false);
+            if (siblingFormat is { } candidateFormat && (winningFormat is not { } currentBest || IsHigherQuality(candidateFormat, currentBest)))
+            {
+                winner = sibling;
+                winningFormat = candidateFormat;
+            }
+        }
+
+        if (winningFormat is not { } format)
+        {
+            AppLog.Info($"Catalog: matched \"{track.Title}\" — {track.Artist} (catalog id {match.Id}) but it (and any same-album-family sibling) has no lossless (ALAC) enhanced-HLS asset.");
             return null;
         }
 
-        var format = EnhancedHlsManifestParser.ParseBestLosslessFormat(manifest);
-        if (format is null)
-        {
-            AppLog.Info($"Catalog: manifest for \"{track.Title}\" — {track.Artist} (catalog id {match.Id}) has no lossless (ALAC) variant.");
-            return null;
-        }
+        AppLog.Info($"Catalog: matched \"{track.Title}\" — {track.Artist} → id {winner.Id} \"{winner.Album}\" ({format.SampleRateHz} Hz / {format.BitDepth}-bit).");
 
         // This Track resolved, so it's the best available anchor for predicting the next one —
         // fill the buffer in the background. Runs for prompt and late successes alike (both end
         // up here), which is exactly right: even a late-arriving current-track resolution makes
-        // the *next* track's prediction worth having ready.
-        StartNextTrackPrefetch(match.Id, knownAlbumTracks: null);
+        // the *next* track's prediction worth having ready. Anchored on the winning edition, not
+        // necessarily the initially-ranked match, since that's the album Apple is actually
+        // streaming from and therefore the one the next track is likely to come from too.
+        StartNextTrackPrefetch(winner.Id, knownAlbumTracks: null);
 
         // ParseBestLosslessFormat only ever matches ALAC variants (see its AUDIO-FORMAT filter),
         // so a result here is always genuinely lossless — IsLossless: true, not left null.
-        return new FormatResolution(format.Value, ResolutionConfidence.Exact, Name, IsLossless: true);
+        return new FormatResolution(format, ResolutionConfidence.Exact, Name, IsLossless: true);
     }
+
+    private async Task<DeviceFormat?> FetchLosslessFormatAsync(
+        string storefront, CatalogSearchCandidate candidate, AppleMusicToken token, CancellationToken cancellationToken)
+    {
+        var manifest = await _client.FetchEnhancedHlsManifestAsync(storefront, candidate.Id, token.Value, cancellationToken)
+            .ConfigureAwait(false);
+        return manifest is null ? null : EnhancedHlsManifestParser.ParseBestLosslessFormat(manifest);
+    }
+
+    private static bool IsHigherQuality(DeviceFormat candidate, DeviceFormat current) =>
+        candidate.SampleRateHz > current.SampleRateHz ||
+        (candidate.SampleRateHz == current.SampleRateHz && candidate.BitDepth > current.BitDepth);
 
     /// <summary>
     /// Kicks off the background fill of the next-track buffer, predicting "the album track after
