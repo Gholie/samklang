@@ -433,79 +433,63 @@ public class DashboardViewModelTests
 
     // --- Clicking an album track (PlayAlbumTrackCommand) ---
 
-    private sealed class FakeMediaTransport : IMediaTransport
+    private sealed class FakeAppleMusicTrackLauncher : IAppleMusicTrackLauncher
     {
-        // Only SkipPreviousAsync/SkipNextAsync matter to these tests (navigation), so artwork is
-        // a stub: null with an event this fake never raises. The explicit accessor-only
-        // implementation (rather than a plain field-like event) avoids a CS0067 "never used"
-        // warning for an event this interface requires but these tests don't exercise.
-        public byte[]? ArtworkBytes => null;
-        public event EventHandler? ArtworkChanged { add { } remove { } }
+        public List<string> PlayedCatalogIds { get; } = [];
 
-        public List<string> Calls { get; } = [];
-
-        public Task SkipPreviousAsync()
+        public Task PlayTrackAsync(string catalogTrackId)
         {
-            Calls.Add("Previous");
-            return Task.CompletedTask;
-        }
-
-        public Task TogglePlayPauseAsync()
-        {
-            Calls.Add("TogglePlayPause");
-            return Task.CompletedTask;
-        }
-
-        public Task SkipNextAsync()
-        {
-            Calls.Add("Next");
+            PlayedCatalogIds.Add(catalogTrackId);
             return Task.CompletedTask;
         }
     }
 
-    private static (DashboardViewModel ViewModel, FakeTrackWatcher Watcher, FakeMediaTransport Transport) CreateSutWithTransport()
+    private static (DashboardViewModel ViewModel, FakeTrackWatcher Watcher, FakeAppleMusicTrackLauncher Launcher) CreateSutWithLauncher()
     {
         var watcher = new FakeTrackWatcher();
         var resolver = new FakeResolver(new FormatResolution(new DeviceFormat(44_100, 24), ResolutionConfidence.Fallback, "Tier fallback"));
         var coordinator = new TrackSyncCoordinator(watcher, resolver, new FakeDeviceController(), new FakeRestingFormatReverter());
-        var transport = new FakeMediaTransport();
-        var viewModel = new DashboardViewModel(coordinator, transport: transport);
-        return (viewModel, watcher, transport);
+        var launcher = new FakeAppleMusicTrackLauncher();
+        var viewModel = new DashboardViewModel(coordinator, trackLauncher: launcher);
+        return (viewModel, watcher, launcher);
     }
 
     [Fact]
-    public void Clicking_a_later_track_skips_forward_by_the_row_distance()
+    public void Clicking_a_track_plays_its_catalog_id_directly()
     {
-        // FakeMediaTransport's calls all return an already-completed Task, so
-        // PlayAlbumTrackCommand's fire-and-forget async walk (see NavigateToTrackAsync) runs to
-        // completion synchronously within Execute — nothing to await from the test's side.
-        var (viewModel, watcher, transport) = CreateSutWithTransport();
+        // FakeAppleMusicTrackLauncher completes synchronously, so PlayAlbumTrackCommand's
+        // fire-and-forget call (see PlayTrackAsync) runs to completion within Execute.
+        var (viewModel, watcher, launcher) = CreateSutWithLauncher();
         watcher.Fire(new Track("Track One", "Artist", "Album"));
         viewModel.OnAlbumTracksAvailable(Album);
 
         var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Three");
         viewModel.PlayAlbumTrackCommand.Execute(target);
 
-        Assert.Equal(["Next", "Next"], transport.Calls);
+        Assert.Equal(["id-3"], launcher.PlayedCatalogIds);
     }
 
     [Fact]
-    public void Clicking_an_earlier_track_skips_backward_by_the_row_distance()
+    public void Clicking_a_track_plays_the_right_song_even_when_it_is_not_the_next_or_previous_row()
     {
-        var (viewModel, watcher, transport) = CreateSutWithTransport();
-        watcher.Fire(new Track("Track Three", "Artist", "Album"));
+        // The bug this fixes: the old walk-based navigation assumed the play queue was this album
+        // in order, so on a discovery station or shuffled playlist it landed on an unrelated song.
+        // Deep-linking by catalog id is queue-independent — the exact clicked song is played
+        // regardless of how far it sits from the currently-flagged row.
+        var (viewModel, watcher, launcher) = CreateSutWithLauncher();
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
         viewModel.OnAlbumTracksAvailable(Album);
 
-        var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track One");
+        var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Two");
         viewModel.PlayAlbumTrackCommand.Execute(target);
 
-        Assert.Equal(["Previous", "Previous"], transport.Calls);
+        Assert.Equal(["id-2"], launcher.PlayedCatalogIds);
     }
 
     [Fact]
     public void Clicking_the_currently_playing_track_is_disabled()
     {
-        var (viewModel, watcher, _) = CreateSutWithTransport();
+        var (viewModel, watcher, _) = CreateSutWithLauncher();
         watcher.Fire(new Track("Track Two", "Artist", "Album"));
         viewModel.OnAlbumTracksAvailable(Album);
 
@@ -515,11 +499,11 @@ public class DashboardViewModelTests
     }
 
     [Fact]
-    public void Navigation_is_disabled_for_a_null_parameter()
+    public void Playing_a_track_is_disabled_for_a_null_parameter()
     {
         // Guards against a stray CanExecute probe with no CommandParameter bound yet (e.g. WPF's
         // own CommandManager requery) rather than assuming a row is always supplied.
-        var (viewModel, watcher, _) = CreateSutWithTransport();
+        var (viewModel, watcher, _) = CreateSutWithLauncher();
         watcher.Fire(new Track("Track One", "Artist", "Album"));
         viewModel.OnAlbumTracksAvailable(Album);
 
@@ -527,7 +511,7 @@ public class DashboardViewModelTests
     }
 
     [Fact]
-    public void Navigation_is_disabled_without_a_transport()
+    public void Playing_a_track_is_disabled_without_a_launcher()
     {
         var (viewModel, watcher, _, _) = CreateSut();
         watcher.Fire(new Track("Track One", "Artist", "Album"));

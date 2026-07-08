@@ -74,9 +74,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         AppLog.Info($"Samklang starting: {VersionInfo.CurrentDisplay}.", category: "App", always: true);
 
         _catalogHttpClient = new HttpClient();
+        // Shared between the catalog layer (which storefront to resolve formats against) and the
+        // album picker's track launcher (which storefront to build a play link for), so both point
+        // at the same store the user actually browses.
+        var storefrontProvider = new WindowsRegionStorefrontProvider(() => _settingsManager.Current.StorefrontOverride);
         var catalogLayer = new CatalogFormatResolverLayer(
             new HttpAppleMusicCatalogClient(_catalogHttpClient),
-            new WindowsRegionStorefrontProvider(() => _settingsManager.Current.StorefrontOverride));
+            storefrontProvider);
         var playCacheLayer = new PlayCacheFormatResolverLayer();
         var resolver = new FormatResolverChain([catalogLayer, playCacheLayer, new FallbackFormatResolverLayer()]);
 
@@ -109,12 +113,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // reactions through this window's Dispatcher — required because History is an
         // ObservableCollection a bound ListView enumerates live, which throws if mutated off the
         // UI thread.
-        // _trackWatcher doubles as the IMediaTransport (same SMTC session) — passed here too so
-        // clicking an album track can drive playback (DashboardViewModel.PlayAlbumTrackCommand),
-        // not just for the now-playing card's own transport buttons below.
+        // Clicking an album track plays that exact song via a catalog deep link
+        // (DashboardViewModel.PlayAlbumTrackCommand) rather than walking SMTC's relative
+        // previous/next — the latter only reached the right song when Apple Music's queue was this
+        // album in order, and landed on an unrelated track on a discovery station or shuffled
+        // playlist. The launcher shares the catalog layer's storefront provider.
         var dashboardViewModel = new DashboardViewModel(
             _coordinator, uiThreadInvoker: action => Dispatcher.BeginInvoke(action), settingsManager: _settingsManager,
-            transport: _trackWatcher);
+            trackLauncher: new AppleMusicUriLauncher(storefrontProvider));
         var settingsViewModel = new SettingsViewModel(_settingsManager, _deviceController, _startupRegistration);
 
         // The album view rides along on the catalog layer's next-track prefetch — the album list

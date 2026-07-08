@@ -37,14 +37,7 @@ public sealed class DashboardViewModel : ViewModelBase
     private readonly SettingsManager? _settingsManager;
     private readonly IClock _clock;
     private readonly Action<Action> _uiThreadInvoker;
-    private readonly IMediaTransport? _transport;
-
-    /// <summary>
-    /// Guards <see cref="PlayAlbumTrackCommand"/> against overlapping invocations — the navigation
-    /// walks the transport one Previous/Next call at a time (see the command's own doc comment),
-    /// and a second click landing mid-walk would race it onto the wrong track.
-    /// </summary>
-    private bool _isNavigatingTrack;
+    private readonly IAppleMusicTrackLauncher? _trackLauncher;
 
     /// <summary>
     /// The current album's tracks as last delivered by
@@ -76,19 +69,19 @@ public sealed class DashboardViewModel : ViewModelBase
         IClock? clock = null,
         Action<Action>? uiThreadInvoker = null,
         SettingsManager? settingsManager = null,
-        IMediaTransport? transport = null)
+        IAppleMusicTrackLauncher? trackLauncher = null)
     {
         _coordinator = coordinator;
         _settingsManager = settingsManager;
         _clock = clock ?? new SystemClock();
         _uiThreadInvoker = uiThreadInvoker ?? (action => action());
-        _transport = transport;
+        _trackLauncher = trackLauncher;
 
         _coordinator.PropertyChanged += OnCoordinatorPropertyChanged;
 
         PlayAlbumTrackCommand = new RelayCommand<AlbumTrackEntry>(
-            entry => _ = NavigateToTrackAsync(entry),
-            CanNavigateToTrack);
+            entry => _ = PlayTrackAsync(entry),
+            CanPlayTrack);
 
         Refresh(appendHistoryEntry: false);
 
@@ -114,20 +107,15 @@ public sealed class DashboardViewModel : ViewModelBase
     public ObservableCollection<AlbumTrackEntry> AlbumTracks { get; } = [];
 
     /// <summary>
-    /// Clicking an album-track row asks the transport to jump to it. SMTC has no "play this
-    /// track" or "jump to queue position N" verb — see docs/CONTEXT.md's Next Track Buffer note,
-    /// "SMTC exposes no play queue" — so this is a heuristic, not a guarantee: it walks from the
-    /// row currently flagged <see cref="AlbumTrackEntry.IsCurrent"/> to the clicked row using
-    /// repeated <see cref="IMediaTransport.SkipNextAsync"/>/<see cref="IMediaTransport.SkipPreviousAsync"/>
-    /// calls, on the same "Apple Music is playing this album in album order" assumption the
-    /// catalog layer's next-track prefetch already relies on (see
-    /// <see cref="CatalogFormatResolverLayer.AlbumTracksAvailable"/>). It lands on the wrong track
-    /// if that assumption doesn't hold — shuffle, or a queue that isn't this album — the same
-    /// failure mode the prefetch already silently tolerates (there it just costs a cache miss;
-    /// here it costs a wrong song, so treat this as best-effort UI convenience, not a reliable seek).
-    /// Disabled (see <see cref="CanNavigateToTrack"/>) when there's no transport, no row is
-    /// currently flagged as playing (nothing to walk *from*), the clicked row already is the
-    /// current one, or a previous click's walk is still in flight.
+    /// Clicking an album-track row plays that exact song. It hands the row's Apple Music catalog id
+    /// to <see cref="IAppleMusicTrackLauncher"/>, which deep-links straight to the track — so it
+    /// works no matter what the queue is (a discovery station, a shuffled playlist, or the album
+    /// itself). This deliberately replaces the original relative-skip walk over
+    /// <see cref="IMediaTransport"/>: SMTC exposes no "play this track" verb (see docs/CONTEXT.md's
+    /// Next Track Buffer note, "SMTC exposes no play queue"), so walking Previous/Next only reached
+    /// the right song when the queue *was* this album in album order and landed on an unrelated song
+    /// otherwise — the reported bug. Disabled (see <see cref="CanPlayTrack"/>) when there's no
+    /// launcher, the clicked row already is the current one, or the row has no catalog id to play.
     /// </summary>
     public RelayCommand<AlbumTrackEntry> PlayAlbumTrackCommand { get; }
 
@@ -336,76 +324,41 @@ public sealed class DashboardViewModel : ViewModelBase
         for (var i = 0; i < _albumCandidates.Count; i++)
         {
             var candidate = _albumCandidates[i];
-            AlbumTracks.Add(new AlbumTrackEntry(i + 1, candidate.Title, candidate.Artist, IsCurrent: ReferenceEquals(candidate, current), candidate.Duration));
+            AlbumTracks.Add(new AlbumTrackEntry(
+                i + 1, candidate.Title, candidate.Artist,
+                IsCurrent: ReferenceEquals(candidate, current), CatalogId: candidate.Id, Duration: candidate.Duration));
         }
 
         HasAlbumTracks = true;
         AlbumTracksHeader = $"{DefaultAlbumTracksHeader} — {current.Album}";
     }
 
-    private bool CanNavigateToTrack(AlbumTrackEntry? entry) =>
+    private bool CanPlayTrack(AlbumTrackEntry? entry) =>
         entry is not null
         && !entry.IsCurrent
-        && _transport is not null
-        && !_isNavigatingTrack
-        && IndexOfCurrentTrack() >= 0
+        && !string.IsNullOrEmpty(entry.CatalogId)
+        && _trackLauncher is not null
         && AlbumTracks.IndexOf(entry) >= 0;
 
     /// <summary>
-    /// Walks the transport from the currently-flagged row to <paramref name="entry"/> — see
-    /// <see cref="PlayAlbumTrackCommand"/>'s doc comment for the "no real seek" caveat this
-    /// relies on. Re-validates everything <see cref="CanNavigateToTrack"/> already checked: the
-    /// row list, and which row is current, can change between a click landing in the UI thread's
-    /// queue and this method actually running.
+    /// Deep-links Apple Music straight to <paramref name="entry"/>'s catalog track — see
+    /// <see cref="PlayAlbumTrackCommand"/>'s doc comment for why this replaced the old
+    /// relative-skip walk. Re-validates what <see cref="CanPlayTrack"/> checked: a row can leave
+    /// the list, or become the current one, between a click landing in the UI thread's queue and
+    /// this method actually running.
     /// </summary>
-    private async Task NavigateToTrackAsync(AlbumTrackEntry? entry)
+    private async Task PlayTrackAsync(AlbumTrackEntry? entry)
     {
-        if (entry is null || _transport is null || _isNavigatingTrack)
+        if (entry is null
+            || entry.IsCurrent
+            || string.IsNullOrEmpty(entry.CatalogId)
+            || _trackLauncher is null
+            || AlbumTracks.IndexOf(entry) < 0)
         {
             return;
         }
 
-        var targetIndex = AlbumTracks.IndexOf(entry);
-        var currentIndex = IndexOfCurrentTrack();
-        if (targetIndex < 0 || currentIndex < 0 || targetIndex == currentIndex)
-        {
-            return;
-        }
-
-        _isNavigatingTrack = true;
-        try
-        {
-            var distance = targetIndex - currentIndex;
-            for (var i = 0; i < Math.Abs(distance); i++)
-            {
-                if (distance > 0)
-                {
-                    await _transport.SkipNextAsync();
-                }
-                else
-                {
-                    await _transport.SkipPreviousAsync();
-                }
-            }
-        }
-        finally
-        {
-            _isNavigatingTrack = false;
-        }
-    }
-
-    /// <summary>The index of the row currently flagged <see cref="AlbumTrackEntry.IsCurrent"/>, or -1 when none is (no track playing, or it isn't on this album).</summary>
-    private int IndexOfCurrentTrack()
-    {
-        for (var i = 0; i < AlbumTracks.Count; i++)
-        {
-            if (AlbumTracks[i].IsCurrent)
-            {
-                return i;
-            }
-        }
-
-        return -1;
+        await _trackLauncher.PlayTrackAsync(entry.CatalogId);
     }
 
     private void AppendHistoryEntry(FormatResolution resolution)
