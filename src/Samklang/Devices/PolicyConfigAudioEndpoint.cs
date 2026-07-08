@@ -47,7 +47,7 @@ public sealed class PolicyConfigAudioEndpoint : IAudioEndpoint
         {
             using var device = GetDevice(deviceId);
             var format = PolicyConfigInterop.GetDeviceFormat(device.ID);
-            return format is null ? null : new DeviceFormat(format.SampleRate, format.BitsPerSample);
+            return format is null ? null : new DeviceFormat(format.SampleRate, WaveFormatBitDepth.Effective(format));
         }
         catch
         {
