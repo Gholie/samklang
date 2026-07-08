@@ -1,0 +1,14 @@
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- C small-size variant: same design, exaggerated stroke weights for 16-32 px -->
+  <defs>
+    <linearGradient id="tileCS" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FB5C74"/>
+      <stop offset="1" stop-color="#FA233B"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="248" height="248" rx="48" fill="url(#tileCS)"/>
+  <path d="M 112 142 A 30 30 0 1 1 82.1 169.4" stroke="#fff" stroke-width="24" fill="none" stroke-linecap="butt"/>
+  <path d="M 84.4 143.5 L 98.7 173.9 L 64.9 170.9 Z" fill="#fff"/>
+  <rect x="132" y="54" width="20" height="122" rx="10" fill="#fff"/>
+  <path d="M 152 62 C 182 76, 190 102, 178 130" stroke="#fff" stroke-width="18" fill="none" stroke-linecap="round"/>
+</svg>

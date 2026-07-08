@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Dev-only utility for regenerating assets/icon.ico from the SVG masters — see
+       assets/ICONS.md for usage. Deliberately not referenced by Samklang.sln so app/CI builds
+       never pull in SkiaSharp. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Svg.Skia" Version="5.1.1" />
+  </ItemGroup>
+
+</Project>
