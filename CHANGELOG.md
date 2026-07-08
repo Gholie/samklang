@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/Gholie/samklang/compare/v1.4.0...v1.4.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* **ui:** play the clicked album track by catalog deep link, not relative skips ([#59](https://github.com/Gholie/samklang/issues/59)) ([0418e25](https://github.com/Gholie/samklang/commit/0418e25c97f5fc6b08ab7561cd4ee5716c578a31))
+
 ## [1.4.0](https://github.com/Gholie/samklang/compare/v1.3.0...v1.4.0) (2026-07-08)
 
 
