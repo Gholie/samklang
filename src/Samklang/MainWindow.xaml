@@ -7,6 +7,8 @@
                  Width="680" Height="720"
                  MinWidth="520" MinHeight="480"
                  WindowStartupLocation="CenterScreen"
+                 ExtendsContentIntoTitleBar="True"
+                 WindowCornerPreference="Round"
                  Loaded="Window_Loaded"
                  Closing="Window_Closing"
                  Closed="Window_Closed">
@@ -15,7 +17,21 @@
         <local:ArtworkImageConverter x:Key="ArtworkToImage" />
     </Window.Resources>
 
-    <TabControl Margin="16">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Issue #39: FluentWindow draws no native chrome, so without this TitleBar the window
+             had no close/minimize buttons and no draggable caption area. It also supplies the
+             snap-layout / maximize behavior; the close button routes through Window_Closing and
+             therefore keeps the hide-to-tray behavior. Title tracks Window.Title, which carries
+             the version suffix set in the constructor. -->
+        <ui:TitleBar Grid.Row="0"
+                     Title="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}" />
+
+    <TabControl Grid.Row="1" Margin="16">
         <!-- Now-playing panel + recent-switch history (issue #9). The now-playing presentation
              has two modes behind Settings.RichNowPlaying: a rich hero card (album artwork,
              transport controls, playing animation — NowPlayingViewModel) or a plain text line,
@@ -422,4 +438,5 @@
             </ScrollViewer>
         </TabItem>
     </TabControl>
+    </Grid>
 </ui:FluentWindow>
