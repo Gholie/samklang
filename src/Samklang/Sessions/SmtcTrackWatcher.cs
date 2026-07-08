@@ -1,4 +1,5 @@
 using Samklang.Domain;
+using Samklang.Logging;
 using Windows.Media.Control;
 using Windows.Storage.Streams;
 using AppPlaybackState = Samklang.Domain.PlaybackState;
@@ -143,11 +144,12 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IMediaTransport, IDisposab
             var artwork = await TryReadArtworkAsync(properties.Thumbnail);
             _refreshGuard.TryApply(token, () => SetArtwork(artwork));
         }
-        catch
+        catch (Exception ex)
         {
             // The session can disappear mid-read (app closing, track skip mid-flight); treat it
             // as "no track" rather than propagating a transient COM failure into the UI — unless
             // a newer refresh has already taken over, in which case its result stands.
+            AppLog.Error("Failed to read track metadata from the SMTC session — treating as no track.", ex, category: "TrackWatcher");
             _refreshGuard.TryApply(token, () =>
             {
                 SetCurrentTrack(null);
@@ -195,9 +197,10 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IMediaTransport, IDisposab
         {
             await session.TrySkipPreviousAsync();
         }
-        catch
+        catch (Exception ex)
         {
             // Session gone mid-call (app closing); the button press just does nothing.
+            AppLog.Warn($"SkipPrevious command failed: {ex.GetType().Name}: {ex.Message}", category: "MediaTransport");
         }
     }
 
@@ -212,9 +215,10 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IMediaTransport, IDisposab
         {
             await session.TryTogglePlayPauseAsync();
         }
-        catch
+        catch (Exception ex)
         {
             // Session gone mid-call (app closing); the button press just does nothing.
+            AppLog.Warn($"TogglePlayPause command failed: {ex.GetType().Name}: {ex.Message}", category: "MediaTransport");
         }
     }
 
@@ -229,9 +233,10 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IMediaTransport, IDisposab
         {
             await session.TrySkipNextAsync();
         }
-        catch
+        catch (Exception ex)
         {
             // Session gone mid-call (app closing); the button press just does nothing.
+            AppLog.Warn($"SkipNext command failed: {ex.GetType().Name}: {ex.Message}", category: "MediaTransport");
         }
     }
 
@@ -254,10 +259,11 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IMediaTransport, IDisposab
                 _ => AppPlaybackState.Stopped,
             });
         }
-        catch
+        catch (Exception ex)
         {
             // Mirrors RefreshTrackAsync's handling: a session that disappears mid-read reads as
             // idle rather than propagating a transient COM failure.
+            AppLog.Warn($"Failed to read playback state from the SMTC session — treating as stopped: {ex.GetType().Name}: {ex.Message}", category: "TrackWatcher");
             SetPlaybackState(AppPlaybackState.Stopped);
         }
     }

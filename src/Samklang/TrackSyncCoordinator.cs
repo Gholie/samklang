@@ -182,7 +182,7 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
             // transitions (e.Track is null for those, which is handled below as before).
             if (e.Track is { } candidate && TransientTrackDetector.IsTransient(candidate))
             {
-                AppLog.Info($"Ignoring transient SMTC state \"{candidate.Title}\" — keeping current track.");
+                AppLog.Info($"Ignoring transient SMTC state \"{candidate.Title}\" — keeping current track.", category: "TrackSync");
                 return;
             }
 
@@ -255,14 +255,23 @@ public sealed class TrackSyncCoordinator : INotifyPropertyChanged
         AppliedFormat = RateFamilyClamp.Clamp(target, supportedSampleRates);
         OnPropertyChanged(nameof(AppliedFormat));
 
+        // Timed even though ApplyTargetFormat no-ops (returns false, no mute/switch) when the
+        // sample rate already matches — a switch that's unexpectedly slow (a device driver being
+        // slow to apply the new format) is exactly the case a diagnosable log needs elapsed time
+        // for, and the no-op case is cheap to time anyway.
+        var switchTimer = System.Diagnostics.Stopwatch.StartNew();
+        var switched = _deviceController.ApplyTargetFormat(AppliedFormat.Value);
+        switchTimer.Stop();
+
         if (AppliedFormat != previousAppliedFormat)
         {
             AppLog.Info(
                 $"Switching device to {AppliedFormat} for \"{CurrentTrack?.Title}\" " +
-                $"(resolved {resolution.Target} via {resolution.SourceLayer}, {resolution.Confidence}).");
+                $"(resolved {resolution.Target} via {resolution.SourceLayer}, {resolution.Confidence}) " +
+                $"— {(switched ? "applied" : "skipped, rate already matched")} in {switchTimer.ElapsedMilliseconds} ms.",
+                category: "TrackSync");
         }
 
-        _deviceController.ApplyTargetFormat(AppliedFormat.Value);
         RefreshDeviceFormat();
     }
 

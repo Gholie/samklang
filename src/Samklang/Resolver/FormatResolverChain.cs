@@ -32,7 +32,8 @@ public sealed class FormatResolverChain : IFormatResolver
             {
                 AppLog.Info(
                     $"Resolved \"{track.Title}\" — {track.Artist} via {layer.Name}: " +
-                    $"{resolution.Target.SampleRateHz} Hz / {resolution.Target.BitDepth}-bit ({resolution.Confidence}).");
+                    $"{resolution.Target.SampleRateHz} Hz / {resolution.Target.BitDepth}-bit ({resolution.Confidence}).",
+                    category: "Resolver");
                 return resolution;
             }
         }

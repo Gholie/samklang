@@ -45,7 +45,6 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
@@ -342,62 +341,164 @@
                             Title="Switching paused"
                             Message="Formats won't change until you resume from the tray menu." />
 
-                <!-- The bottom list: the current album's tracks by default (fed by the catalog
-                     layer's prefetch — no extra lookups), or the recent-switches log for users
-                     who re-enable it in Settings ("Show switch log"). Only one is ever visible;
-                     they share the two rows. -->
-                <TextBlock Grid.Row="5" Text="{Binding Dashboard.AlbumTracksHeader}" FontWeight="SemiBold" Margin="0,0,0,8"
-                           Visibility="{Binding Dashboard.ShowAlbumTracks, Converter={StaticResource BoolToVis}}" />
-                <TextBlock Grid.Row="5" Text="Recent switches" FontWeight="SemiBold" Margin="0,0,0,8"
-                           Visibility="{Binding Dashboard.ShowSwitchLog, Converter={StaticResource BoolToVis}}" />
+                <!-- Apple-Music-style tabs beneath the now-playing area: "Playing Next" (the
+                     current album's tracks, fed by the catalog layer's prefetch — no extra
+                     lookups) and "History" (the recent-switches log). Both are always live under
+                     the hood now; SelectedTabIndex just remembers which one the user is looking
+                     at (seeded from Settings' "Show switch log" on first load, then purely
+                     user-driven — see DashboardViewModel.SelectedTabIndex). -->
+                <TabControl Grid.Row="5" Padding="0" Margin="0,4,0,0"
+                            SelectedIndex="{Binding Dashboard.SelectedTabIndex, Mode=TwoWay}">
+                    <TabItem Header="Playing Next">
+                        <Grid Margin="0,12,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
 
-                <Grid Grid.Row="6" Visibility="{Binding Dashboard.ShowAlbumTracks, Converter={StaticResource BoolToVis}}">
-                    <ListView ItemsSource="{Binding Dashboard.AlbumTracks}" BorderThickness="0"
-                              Visibility="{Binding Dashboard.HasAlbumTracks, Converter={StaticResource BoolToVis}}">
-                        <ListView.ItemContainerStyle>
-                            <Style TargetType="ListViewItem">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsCurrent}" Value="True">
-                                        <Setter Property="FontWeight" Value="SemiBold" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </ListView.ItemContainerStyle>
-                        <ListView.View>
-                            <GridView>
-                                <GridViewColumn Header="#" DisplayMemberBinding="{Binding Number}" Width="36" />
-                                <GridViewColumn Header="Title" DisplayMemberBinding="{Binding Title}" Width="320" />
-                                <GridViewColumn Header="Artist" DisplayMemberBinding="{Binding Artist}" Width="180" />
-                            </GridView>
-                        </ListView.View>
-                    </ListView>
-                    <TextBlock Text="Album tracks appear here once the playing track gets a catalog match."
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" Margin="4,4,0,0">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Dashboard.HasAlbumTracks}" Value="True">
-                                        <Setter Property="Visibility" Value="Collapsed" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </Grid>
+                            <TextBlock Grid.Row="0" Text="{Binding Dashboard.AlbumTracksHeader}"
+                                       FontWeight="SemiBold" Margin="0,0,0,8" />
 
-                <ListView Grid.Row="6" ItemsSource="{Binding Dashboard.History}" BorderThickness="0"
-                          Visibility="{Binding Dashboard.ShowSwitchLog, Converter={StaticResource BoolToVis}}">
-                    <ListView.View>
-                        <GridView>
-                            <GridViewColumn Header="Time" DisplayMemberBinding="{Binding TimestampDisplay}" Width="70" />
-                            <GridViewColumn Header="Track" DisplayMemberBinding="{Binding TrackDisplay}" Width="200" />
-                            <GridViewColumn Header="Target format" DisplayMemberBinding="{Binding TargetFormatDisplay}" Width="110" />
-                            <GridViewColumn Header="Audio Tier" DisplayMemberBinding="{Binding AudioTierDisplay}" Width="100" />
-                            <GridViewColumn Header="Confidence" DisplayMemberBinding="{Binding ConfidenceDisplay}" Width="90" />
-                            <GridViewColumn Header="Source layer" DisplayMemberBinding="{Binding SourceLayer}" Width="100" />
-                        </GridView>
-                    </ListView.View>
-                </ListView>
+                            <Grid Grid.Row="1">
+                                <!-- Apple-Music-style track rows: a shared album-artwork thumbnail (every
+                                     row is from the same album, so one ArtworkBytes binding covers them
+                                     all), title/artist stacked in the middle, duration at the trailing
+                                     edge. Cards with a hover highlight over a GridView table so it reads
+                                     like a track list, not a grid. -->
+                                <ListView ItemsSource="{Binding Dashboard.AlbumTracks}" BorderThickness="0"
+                                          Background="Transparent"
+                                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                          Visibility="{Binding Dashboard.HasAlbumTracks, Converter={StaticResource BoolToVis}}">
+                                    <!-- Clicking a row plays that track (Dashboard.PlayAlbumTrackCommand),
+                                         wired via local:ItemClickBehavior since ListViewItem (unlike
+                                         ButtonBase) has no built-in Command. CommandParameter is
+                                         {Binding} — the row's own AlbumTrackEntry, which is this
+                                         ListViewItem's DataContext; the command itself lives up on
+                                         Dashboard, reached the same RelativeSource-to-Window way the
+                                         hero card's tier badge above does. -->
+                                    <ListView.ItemContainerStyle>
+                                        <Style TargetType="ListViewItem">
+                                            <Setter Property="Padding" Value="0" />
+                                            <Setter Property="Margin" Value="0,0,0,2" />
+                                            <Setter Property="Background" Value="Transparent" />
+                                            <Setter Property="BorderThickness" Value="0" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Cursor" Value="Hand" />
+                                            <Setter Property="local:ItemClickBehavior.Command"
+                                                    Value="{Binding DataContext.Dashboard.PlayAlbumTrackCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
+                                            <Setter Property="local:ItemClickBehavior.CommandParameter" Value="{Binding}" />
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="ListViewItem">
+                                                        <Border x:Name="RowBorder" Background="{TemplateBinding Background}"
+                                                                CornerRadius="6" Padding="8,6">
+                                                            <ContentPresenter />
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="RowBorder" Property="Background"
+                                                                        Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                                                            </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </ListView.ItemContainerStyle>
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <!-- Track number, de-emphasized — the artwork and title carry the row. -->
+                                                <TextBlock Grid.Column="0" Text="{Binding Number}" FontSize="12"
+                                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                                           Width="20" TextAlignment="Right" VerticalAlignment="Center"
+                                                           Margin="0,0,10,0" />
+
+                                                <!-- Album artwork thumbnail, mirroring the hero card's placeholder-under-image
+                                                     approach: a music-note tile shows through until ArtworkBytes decodes. -->
+                                                <Border Grid.Column="1" Width="40" Height="40" Margin="0,0,12,0"
+                                                        VerticalAlignment="Center">
+                                                    <Grid>
+                                                        <Border CornerRadius="4" Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                                                            <ui:SymbolIcon Symbol="MusicNote224" FontSize="16"
+                                                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                                        </Border>
+                                                        <Border CornerRadius="4">
+                                                            <Border.Background>
+                                                                <ImageBrush Stretch="UniformToFill"
+                                                                            ImageSource="{Binding DataContext.NowPlaying.ArtworkBytes, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Converter={StaticResource ArtworkToImage}}" />
+                                                            </Border.Background>
+                                                        </Border>
+                                                    </Grid>
+                                                </Border>
+
+                                                <!-- Title (accented + bold while playing) with artist beneath. -->
+                                                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,12,0">
+                                                    <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                                               TextTrimming="CharacterEllipsis">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                    <TextBlock Text="{Binding Artist}" FontSize="12"
+                                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                               TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                                                </StackPanel>
+
+                                                <!-- Duration, trailing edge — blank rather than "0:00" when the catalog
+                                                     entry (or an older test fake) carries no duration. -->
+                                                <TextBlock Grid.Column="3" Text="{Binding DurationDisplay}" FontSize="12"
+                                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                                           VerticalAlignment="Center" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                                <TextBlock Text="Album tracks appear here once the playing track gets a catalog match."
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" Margin="4,4,0,0">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Dashboard.HasAlbumTracks}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                        </Grid>
+                    </TabItem>
+
+                    <TabItem Header="History">
+                        <ListView Margin="0,12,0,0" ItemsSource="{Binding Dashboard.History}" BorderThickness="0">
+                            <ListView.View>
+                                <GridView>
+                                    <GridViewColumn Header="Time" DisplayMemberBinding="{Binding TimestampDisplay}" Width="70" />
+                                    <GridViewColumn Header="Track" DisplayMemberBinding="{Binding TrackDisplay}" Width="200" />
+                                    <GridViewColumn Header="Target format" DisplayMemberBinding="{Binding TargetFormatDisplay}" Width="110" />
+                                    <GridViewColumn Header="Audio Tier" DisplayMemberBinding="{Binding AudioTierDisplay}" Width="100" />
+                                    <GridViewColumn Header="Confidence" DisplayMemberBinding="{Binding ConfidenceDisplay}" Width="90" />
+                                    <GridViewColumn Header="Source layer" DisplayMemberBinding="{Binding SourceLayer}" Width="100" />
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+                    </TabItem>
+                </TabControl>
             </Grid>
         </TabItem>
 
@@ -473,6 +574,16 @@
                         <CheckBox Content="Show the switch log instead of the album track list"
                                   IsChecked="{Binding ShowSwitchLogEnabled}" />
                         <TextBlock Text="The bottom list normally shows the current album's tracks; turn this on for the format-switch history."
+                                   FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   TextWrapping="Wrap" Margin="28,2,0,0" />
+                    </StackPanel>
+
+                    <TextBlock Text="Logging" FontWeight="Bold" Margin="0,0,0,8" />
+                    <StackPanel Margin="0,0,0,16">
+                        <!-- Applies immediately (no Save needed), like the other toggles above. Off by default. -->
+                        <CheckBox Content="Enable detailed logging"
+                                  IsChecked="{Binding EnableDetailedLoggingEnabled}" />
+                        <TextBlock Text="Enable detailed logging to a file for debugging."
                                    FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                    TextWrapping="Wrap" Margin="28,2,0,0" />
                     </StackPanel>

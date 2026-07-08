@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Samklang.Domain;
 using Samklang.Resolver.Catalog;
+using Samklang.Sessions;
 using Samklang.SettingsManagement;
 using Samklang.Timing;
 
@@ -36,6 +37,14 @@ public sealed class DashboardViewModel : ViewModelBase
     private readonly SettingsManager? _settingsManager;
     private readonly IClock _clock;
     private readonly Action<Action> _uiThreadInvoker;
+    private readonly IMediaTransport? _transport;
+
+    /// <summary>
+    /// Guards <see cref="PlayAlbumTrackCommand"/> against overlapping invocations — the navigation
+    /// walks the transport one Previous/Next call at a time (see the command's own doc comment),
+    /// and a second click landing mid-walk would race it onto the wrong track.
+    /// </summary>
+    private bool _isNavigatingTrack;
 
     /// <summary>
     /// The current album's tracks as last delivered by
@@ -59,6 +68,7 @@ public sealed class DashboardViewModel : ViewModelBase
     private bool _hasAlbumTracks;
     private string _albumTracksHeader = DefaultAlbumTracksHeader;
     private bool _showSwitchLog;
+    private int _selectedTabIndex;
 
     private const string DefaultAlbumTracksHeader = "Album";
 
@@ -66,12 +76,14 @@ public sealed class DashboardViewModel : ViewModelBase
         TrackSyncCoordinator coordinator,
         IClock? clock = null,
         Action<Action>? uiThreadInvoker = null,
-        SettingsManager? settingsManager = null)
+        SettingsManager? settingsManager = null,
+        IMediaTransport? transport = null)
     {
         _coordinator = coordinator;
         _settingsManager = settingsManager;
         _clock = clock ?? new SystemClock();
         _uiThreadInvoker = uiThreadInvoker ?? (action => action());
+        _transport = transport;
 
         _coordinator.PropertyChanged += OnCoordinatorPropertyChanged;
         if (settingsManager is not null)
@@ -79,8 +91,20 @@ public sealed class DashboardViewModel : ViewModelBase
             settingsManager.PropertyChanged += (_, _) => _uiThreadInvoker(RefreshShowSwitchLog);
         }
 
+        PlayAlbumTrackCommand = new RelayCommand<AlbumTrackEntry>(
+            entry => _ = NavigateToTrackAsync(entry),
+            CanNavigateToTrack);
+
         RefreshShowSwitchLog();
         Refresh(appendHistoryEntry: false);
+
+        // Seeds the tab the dashboard opens on from the "show switch log by default" setting,
+        // one time only. Deliberately not re-derived inside RefreshShowSwitchLog: that handler
+        // fires on *any* settings change (not just this one), and re-forcing the tab every time
+        // would yank the user back out of a tab they'd manually switched to while just, say,
+        // tweaking the Grace Period. After this initial seed, SelectedTabIndex is purely
+        // user-driven via the TabControl's two-way binding.
+        SelectedTabIndex = _showSwitchLog ? 1 : 0;
     }
 
     /// <summary>Recent Format Resolutions/switches, newest first, trimmed to <see cref="MaxHistoryEntries"/>.</summary>
@@ -92,6 +116,24 @@ public sealed class DashboardViewModel : ViewModelBase
     /// catalog layer has an album list in hand, cleared when the playing Track stops matching it.
     /// </summary>
     public ObservableCollection<AlbumTrackEntry> AlbumTracks { get; } = [];
+
+    /// <summary>
+    /// Clicking an album-track row asks the transport to jump to it. SMTC has no "play this
+    /// track" or "jump to queue position N" verb — see docs/CONTEXT.md's Next Track Buffer note,
+    /// "SMTC exposes no play queue" — so this is a heuristic, not a guarantee: it walks from the
+    /// row currently flagged <see cref="AlbumTrackEntry.IsCurrent"/> to the clicked row using
+    /// repeated <see cref="IMediaTransport.SkipNextAsync"/>/<see cref="IMediaTransport.SkipPreviousAsync"/>
+    /// calls, on the same "Apple Music is playing this album in album order" assumption the
+    /// catalog layer's next-track prefetch already relies on (see
+    /// <see cref="CatalogFormatResolverLayer.AlbumTracksAvailable"/>). It lands on the wrong track
+    /// if that assumption doesn't hold — shuffle, or a queue that isn't this album — the same
+    /// failure mode the prefetch already silently tolerates (there it just costs a cache miss;
+    /// here it costs a wrong song, so treat this as best-effort UI convenience, not a reliable seek).
+    /// Disabled (see <see cref="CanNavigateToTrack"/>) when there's no transport, no row is
+    /// currently flagged as playing (nothing to walk *from*), the clicked row already is the
+    /// current one, or a previous click's walk is still in flight.
+    /// </summary>
+    public RelayCommand<AlbumTrackEntry> PlayAlbumTrackCommand { get; }
 
     /// <summary>True while <see cref="AlbumTracks"/> has content; the album view shows a placeholder hint otherwise.</summary>
     public bool HasAlbumTracks
@@ -125,6 +167,18 @@ public sealed class DashboardViewModel : ViewModelBase
 
     /// <summary>The complement of <see cref="ShowSwitchLog"/>, so the view can bind both visibilities without an inverting converter.</summary>
     public bool ShowAlbumTracks => !ShowSwitchLog;
+
+    /// <summary>
+    /// Which tab of the "Playing Next" (0) / "History" (1) TabControl is selected — two-way bound
+    /// so the user can switch freely. Seeded once from <see cref="ShowSwitchLog"/> at startup (see
+    /// the constructor) and left alone after that; it does not track <see cref="ShowSwitchLog"/>
+    /// live the way the boolean visibility properties above do.
+    /// </summary>
+    public int SelectedTabIndex
+    {
+        get => _selectedTabIndex;
+        set => SetField(ref _selectedTabIndex, value);
+    }
 
     public string TrackDisplay
     {
@@ -304,11 +358,76 @@ public sealed class DashboardViewModel : ViewModelBase
         for (var i = 0; i < _albumCandidates.Count; i++)
         {
             var candidate = _albumCandidates[i];
-            AlbumTracks.Add(new AlbumTrackEntry(i + 1, candidate.Title, candidate.Artist, IsCurrent: ReferenceEquals(candidate, current)));
+            AlbumTracks.Add(new AlbumTrackEntry(i + 1, candidate.Title, candidate.Artist, IsCurrent: ReferenceEquals(candidate, current), candidate.Duration));
         }
 
         HasAlbumTracks = true;
         AlbumTracksHeader = $"{DefaultAlbumTracksHeader} — {current.Album}";
+    }
+
+    private bool CanNavigateToTrack(AlbumTrackEntry? entry) =>
+        entry is not null
+        && !entry.IsCurrent
+        && _transport is not null
+        && !_isNavigatingTrack
+        && IndexOfCurrentTrack() >= 0
+        && AlbumTracks.IndexOf(entry) >= 0;
+
+    /// <summary>
+    /// Walks the transport from the currently-flagged row to <paramref name="entry"/> — see
+    /// <see cref="PlayAlbumTrackCommand"/>'s doc comment for the "no real seek" caveat this
+    /// relies on. Re-validates everything <see cref="CanNavigateToTrack"/> already checked: the
+    /// row list, and which row is current, can change between a click landing in the UI thread's
+    /// queue and this method actually running.
+    /// </summary>
+    private async Task NavigateToTrackAsync(AlbumTrackEntry? entry)
+    {
+        if (entry is null || _transport is null || _isNavigatingTrack)
+        {
+            return;
+        }
+
+        var targetIndex = AlbumTracks.IndexOf(entry);
+        var currentIndex = IndexOfCurrentTrack();
+        if (targetIndex < 0 || currentIndex < 0 || targetIndex == currentIndex)
+        {
+            return;
+        }
+
+        _isNavigatingTrack = true;
+        try
+        {
+            var distance = targetIndex - currentIndex;
+            for (var i = 0; i < Math.Abs(distance); i++)
+            {
+                if (distance > 0)
+                {
+                    await _transport.SkipNextAsync();
+                }
+                else
+                {
+                    await _transport.SkipPreviousAsync();
+                }
+            }
+        }
+        finally
+        {
+            _isNavigatingTrack = false;
+        }
+    }
+
+    /// <summary>The index of the row currently flagged <see cref="AlbumTrackEntry.IsCurrent"/>, or -1 when none is (no track playing, or it isn't on this album).</summary>
+    private int IndexOfCurrentTrack()
+    {
+        for (var i = 0; i < AlbumTracks.Count; i++)
+        {
+            if (AlbumTracks[i].IsCurrent)
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private void RefreshShowSwitchLog() =>

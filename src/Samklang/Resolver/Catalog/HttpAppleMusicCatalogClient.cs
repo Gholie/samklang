@@ -80,7 +80,8 @@ public sealed class HttpAppleMusicCatalogClient(HttpClient httpClient) : IAppleM
         }
 
         return songs
-            .Select(song => new CatalogSearchCandidate(song.Id, song.Attributes.Name, song.Attributes.ArtistName, song.Attributes.AlbumName))
+            .Select(song => new CatalogSearchCandidate(
+                song.Id, song.Attributes.Name, song.Attributes.ArtistName, song.Attributes.AlbumName, DurationOf(song.Attributes)))
             .ToList();
     }
 
@@ -151,9 +152,15 @@ public sealed class HttpAppleMusicCatalogClient(HttpClient httpClient) : IAppleM
             // An album's track list can also carry music-video resources; only songs are
             // meaningful next-track predictions.
             .Where(track => track.Type == "songs")
-            .Select(track => new CatalogSearchCandidate(track.Id, track.Attributes.Name, track.Attributes.ArtistName, track.Attributes.AlbumName))
+            .Select(track => new CatalogSearchCandidate(
+                track.Id, track.Attributes.Name, track.Attributes.ArtistName, track.Attributes.AlbumName, DurationOf(track.Attributes)))
             .ToList();
     }
+
+    // durationInMillis is 0 (its JSON default) for the rare resource missing it; treat that as
+    // "unknown" rather than showing a bogus "0:00" in the dashboard.
+    private static TimeSpan? DurationOf(CatalogSongAttributes attributes) =>
+        attributes.DurationInMillis > 0 ? TimeSpan.FromMilliseconds(attributes.DurationInMillis) : null;
 
     private static HttpRequestMessage CreateRequest(HttpMethod method, string url, string token)
     {
@@ -226,6 +233,9 @@ internal sealed class CatalogSongAttributes
 
     [JsonPropertyName("albumName")]
     public string AlbumName { get; set; } = string.Empty;
+
+    [JsonPropertyName("durationInMillis")]
+    public long DurationInMillis { get; set; }
 
     [JsonPropertyName("extendedAssetUrls")]
     public ExtendedAssetUrls? ExtendedAssetUrls { get; set; }

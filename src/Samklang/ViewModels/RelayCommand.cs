@@ -21,3 +21,22 @@ public sealed class RelayCommand(Action execute, Func<bool>? canExecute = null) 
 
     public void Execute(object? parameter) => execute();
 }
+
+/// <summary>
+/// Parameterized sibling of <see cref="RelayCommand"/>, for commands that need to know which item
+/// was invoked (e.g. which row of a list got clicked) rather than acting on ambient view-model
+/// state. Same minimal <see cref="CommandManager.RequerySuggested"/>-backed invalidation as the
+/// non-generic version.
+/// </summary>
+public sealed class RelayCommand<T>(Action<T?> execute, Func<T?, bool>? canExecute = null) : ICommand
+{
+    public event EventHandler? CanExecuteChanged
+    {
+        add => CommandManager.RequerySuggested += value;
+        remove => CommandManager.RequerySuggested -= value;
+    }
+
+    public bool CanExecute(object? parameter) => canExecute?.Invoke((T?)parameter) ?? true;
+
+    public void Execute(object? parameter) => execute((T?)parameter);
+}

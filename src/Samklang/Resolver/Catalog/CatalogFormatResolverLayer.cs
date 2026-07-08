@@ -261,7 +261,7 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
             _lastTransientMetadataSkip = track;
         }
 
-        AppLog.Info($"Catalog: skipping lookup for \"{track.Title}\" — {track.Artist} (empty title/artist is transient SMTC metadata; no search could match).");
+        AppLog.Info($"Catalog: skipping lookup for \"{track.Title}\" — {track.Artist} (empty title/artist is transient SMTC metadata; no search could match).", category: "Catalog");
     }
 
     private void Finalize(Track track, FormatResolution? result, bool alreadyWaitedOut)
@@ -356,13 +356,13 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
             return current;
         }
 
-        AppLog.Info("Catalog: fetching developer token.");
+        AppLog.Info("Catalog: fetching developer token.", category: "Catalog");
         try
         {
             var fetched = await _client.FetchTokenAsync(cancellationToken).ConfigureAwait(false);
             _cachedToken = fetched;
             RegisterTokenSuccess();
-            AppLog.Info($"Catalog: token fetch succeeded (expires {fetched.ExpiresAtUtc:u}).");
+            AppLog.Info($"Catalog: token fetch succeeded (expires {fetched.ExpiresAtUtc:u}).", category: "Catalog");
             return fetched;
         }
         catch (Exception ex)
@@ -385,7 +385,7 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
 
         if (priorFailures > 0)
         {
-            AppLog.Info($"Catalog: token fetch recovered after {priorFailures} consecutive failure(s) — cooldown cleared.");
+            AppLog.Info($"Catalog: token fetch recovered after {priorFailures} consecutive failure(s) — cooldown cleared.", category: "Catalog");
         }
     }
 
@@ -403,7 +403,7 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
             _cooldownUntilUtc = _now() + backoff;
         }
 
-        AppLog.Warn($"Catalog: token fetch failed ({failureCount} consecutive) — cooling down for {backoff}. {exception.GetType().Name}: {exception.Message}");
+        AppLog.Warn($"Catalog: token fetch failed ({failureCount} consecutive) — cooling down for {backoff}. {exception.GetType().Name}: {exception.Message}", category: "Catalog");
     }
 
     private async Task<FormatResolution?> ResolveWithTokenAsync(
@@ -421,7 +421,7 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
             // happened to appear in this line.
             var topCandidates = string.Join("; ", candidates.Take(3).Select(c => $"\"{c.Title}\" by {c.Artist}"));
             var candidatesSuffix = topCandidates.Length > 0 ? $"; top: {topCandidates}" : string.Empty;
-            AppLog.Info($"Catalog: no confident match for \"{track.Title}\" — {track.Artist} ({candidates.Count} search candidate(s){candidatesSuffix}).");
+            AppLog.Info($"Catalog: no confident match for \"{track.Title}\" — {track.Artist} ({candidates.Count} search candidate(s){candidatesSuffix}).", category: "Catalog");
             return null;
         }
 
@@ -447,11 +447,11 @@ public sealed class CatalogFormatResolverLayer : IFormatResolverLayer
 
         if (winningFormat is not { } format)
         {
-            AppLog.Info($"Catalog: matched \"{track.Title}\" — {track.Artist} (catalog id {match.Id}) but it (and any same-album-family sibling) has no lossless (ALAC) enhanced-HLS asset.");
+            AppLog.Info($"Catalog: matched \"{track.Title}\" — {track.Artist} (catalog id {match.Id}) but it (and any same-album-family sibling) has no lossless (ALAC) enhanced-HLS asset.", category: "Catalog");
             return null;
         }
 
-        AppLog.Info($"Catalog: matched \"{track.Title}\" — {track.Artist} → id {winner.Id} \"{winner.Album}\" ({format.SampleRateHz} Hz / {format.BitDepth}-bit).");
+        AppLog.Info($"Catalog: matched \"{track.Title}\" — {track.Artist} → id {winner.Id} \"{winner.Album}\" ({format.SampleRateHz} Hz / {format.BitDepth}-bit).", category: "Catalog");
 
         // This Track resolved, so it's the best available anchor for predicting the next one —
         // fill the buffer in the background. Runs for prompt and late successes alike (both end

@@ -6,10 +6,20 @@ using System.Runtime.CompilerServices;
 namespace Samklang.Logging;
 
 /// <summary>
-/// Minimal file logger (2026-07-08 handoff: a user's "catalog isn't resolving" report was
+/// Rolling file logger (2026-07-08 handoff: a user's "catalog isn't resolving" report was
 /// completely undiagnosable because nothing the app did was ever written down anywhere). Appends
 /// terse, timestamped lines to <c>%LOCALAPPDATA%\Samklang\logs\samklang-{yyyy-MM-dd}.log</c> —
 /// the same root Velopack installs the app under, so it's easy to find alongside it.
+///
+/// <para>
+/// Gated by <see cref="Enabled"/> (backed by <see cref="SettingsManagement.Settings.EnableDetailedLogging"/>,
+/// off by default): a user only pays the (small) disk-write cost after opting in from the
+/// Settings page, and every call site below stays a no-op until then. The composition root
+/// (<see cref="MainWindow"/>) syncs <see cref="Enabled"/> from Settings once at startup and again
+/// on every settings change, so flipping the toggle takes effect immediately without a restart.
+/// The log directory and file are still not created until the first write that happens while
+/// enabled — lazy by construction, not by a separate initialization step.
+/// </para>
 ///
 /// <para>
 /// Deliberately a static, hand-rolled writer rather than a NuGet logging framework: this is a
@@ -18,7 +28,8 @@ namespace Samklang.Logging;
 /// <see cref="Error"/> are safe to call from any thread (SMTC callbacks, background catalog
 /// lookups, the UI thread) — writes are serialized on <see cref="Gate"/>, and any I/O failure
 /// (locked file, disk full, permissions) is swallowed so logging itself can never be the reason
-/// the app breaks.
+/// the app breaks; the failure is reported to <see cref="Console.Error"/> only (there is nowhere
+/// else safe to put it once the log file itself is the thing that failed).
 /// </para>
 ///
 /// <para>
@@ -36,11 +47,15 @@ namespace Samklang.Logging;
 /// </summary>
 public static class AppLog
 {
-    /// <summary>Per-file cap before rolling to a new, timestamped file — keeps one bad day from growing a single file without bound.</summary>
-    private const long MaxFileBytes = 2 * 1024 * 1024;
+    /// <summary>Per-file cap before rolling to a numbered backup — 10 MB, per the logging spec.</summary>
+    private const long MaxFileBytes = 10 * 1024 * 1024;
 
-    /// <summary>How many log files (across rolled-over same-day files and prior days) are kept; oldest by last-write time are pruned beyond this.</summary>
-    private const int MaxRetainedFiles = 14;
+    /// <summary>
+    /// How many numbered backups (<c>samklang-{date}.log.1</c> .. <c>.5</c>) are kept once the
+    /// active file rolls. Combined with the one active file, this bounds total disk usage to
+    /// roughly <c>(MaxBackupFiles + 1) * MaxFileBytes</c> ≈ 60 MB.
+    /// </summary>
+    private const int MaxBackupFiles = 5;
 
     private static readonly object Gate = new();
 
@@ -61,20 +76,31 @@ public static class AppLog
     /// </summary>
     internal static bool DisabledForTests { get; set; }
 
-    public static void Info(string message) => Write("INFO", message);
+    /// <summary>
+    /// Whether file logging is currently turned on, per
+    /// <see cref="SettingsManagement.Settings.EnableDetailedLogging"/>. Defaults to false —
+    /// detailed logging is opt-in — so nothing is written (not even the log directory is created)
+    /// until the composition root syncs this from a loaded/changed Settings value. Every
+    /// <see cref="Write"/> call re-checks this, so toggling it off mid-run stops logging
+    /// immediately without needing to close and reopen any file handle (none is held open between
+    /// writes).
+    /// </summary>
+    public static bool Enabled { get; set; }
 
-    public static void Warn(string message) => Write("WARN", message);
+    public static void Info(string message, string category = "General") => Write("INFO", category, message);
+
+    public static void Warn(string message, string category = "General") => Write("WARN", category, message);
 
     /// <summary>
     /// Logs an error. <paramref name="exception"/>'s message (never its full ToString/stack trace
     /// — this is a terse tray-utility log, not a crash dump) is appended when provided.
     /// </summary>
-    public static void Error(string message, Exception? exception = null) =>
-        Write("ERROR", exception is null ? message : $"{message}: {exception.GetType().Name}: {exception.Message}");
+    public static void Error(string message, Exception? exception = null, string category = "General") =>
+        Write("ERROR", category, exception is null ? message : $"{message}: {exception.GetType().Name}: {exception.Message}");
 
-    private static void Write(string level, string message)
+    private static void Write(string level, string category, string message)
     {
-        if (DisabledForTests)
+        if (DisabledForTests || !Enabled)
         {
             return;
         }
@@ -88,21 +114,41 @@ public static class AppLog
                 var path = CurrentLogPath();
                 RollIfOversizedLocked(path);
 
-                var line = $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} [{level}] {message}{Environment.NewLine}";
+                var line = $"[{DateTime.Now:HH:mm:ss.fff}] [{level}] {category}: {message}{Environment.NewLine}";
                 File.AppendAllText(path, line);
 
                 PruneOldFilesLocked();
             }
         }
+        catch (Exception ex)
+        {
+            // Logging must never be the reason the app misbehaves — swallow any I/O failure here
+            // (locked file, disk full, permissions) and report it only to stderr, since the log
+            // file itself is the thing that just failed.
+            TryWriteToStdErr(ex);
+        }
+    }
+
+    private static void TryWriteToStdErr(Exception ex)
+    {
+        try
+        {
+            Console.Error.WriteLine($"Samklang: file logging failed ({ex.GetType().Name}: {ex.Message}).");
+        }
         catch
         {
-            // Logging must never be the reason the app misbehaves — swallow any I/O failure here.
+            // stderr itself can be unavailable (e.g. no console attached); nothing further to do.
         }
     }
 
     private static string CurrentLogPath() => Path.Combine(LogDirectory, $"samklang-{DateTime.Now:yyyy-MM-dd}.log");
 
-    /// <summary>Caller must hold <see cref="Gate"/>. Renames today's file out of the way once it crosses <see cref="MaxFileBytes"/>, so the next write starts a fresh one under the same day's name.</summary>
+    /// <summary>
+    /// Caller must hold <see cref="Gate"/>. Classic numbered-backup rolling once today's file
+    /// crosses <see cref="MaxFileBytes"/>: <c>.4</c> becomes <c>.5</c> (dropping any prior <c>.5</c>),
+    /// <c>.3</c> becomes <c>.4</c>, and so on down to the active file itself becoming <c>.1</c>,
+    /// after which a fresh, empty active file is written to on the next line below.
+    /// </summary>
     private static void RollIfOversizedLocked(string path)
     {
         if (!File.Exists(path) || new FileInfo(path).Length < MaxFileBytes)
@@ -110,20 +156,42 @@ public static class AppLog
             return;
         }
 
-        var rolledPath = Path.Combine(LogDirectory, $"samklang-{DateTime.Now:yyyy-MM-dd-HHmmss}.log");
-        File.Move(path, rolledPath, overwrite: true);
+        var oldestBackup = $"{path}.{MaxBackupFiles}";
+        if (File.Exists(oldestBackup))
+        {
+            File.Delete(oldestBackup);
+        }
+
+        for (var i = MaxBackupFiles - 1; i >= 1; i--)
+        {
+            var source = $"{path}.{i}";
+            if (File.Exists(source))
+            {
+                File.Move(source, $"{path}.{i + 1}", overwrite: true);
+            }
+        }
+
+        File.Move(path, $"{path}.1", overwrite: true);
     }
 
-    /// <summary>Caller must hold <see cref="Gate"/>. Simple retention: oldest files by last-write time beyond <see cref="MaxRetainedFiles"/> are deleted. No log line is precious enough to justify smarter bookkeeping here.</summary>
+    /// <summary>
+    /// Caller must hold <see cref="Gate"/>. Bounds total disk usage regardless of how many
+    /// calendar days the app has been logging on: today's active file plus its numbered backups
+    /// is <see cref="MaxBackupFiles"/> + 1 files, so anything beyond that many files total —
+    /// including whole prior days' files once they age out — is pruned, oldest by last-write time
+    /// first. No log line is precious enough to justify smarter cross-day bookkeeping here.
+    /// </summary>
     private static void PruneOldFilesLocked()
     {
-        var files = new DirectoryInfo(LogDirectory).GetFiles("samklang-*.log");
-        if (files.Length <= MaxRetainedFiles)
+        const int maxRetainedFiles = MaxBackupFiles + 1;
+
+        var files = new DirectoryInfo(LogDirectory).GetFiles("samklang-*.log*");
+        if (files.Length <= maxRetainedFiles)
         {
             return;
         }
 
-        foreach (var stale in files.OrderByDescending(f => f.LastWriteTimeUtc).Skip(MaxRetainedFiles))
+        foreach (var stale in files.OrderByDescending(f => f.LastWriteTimeUtc).Skip(maxRetainedFiles))
         {
             stale.Delete();
         }
