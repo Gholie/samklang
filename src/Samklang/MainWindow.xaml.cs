@@ -113,14 +113,20 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // reactions through this window's Dispatcher — required because History is an
         // ObservableCollection a bound ListView enumerates live, which throws if mutated off the
         // UI thread.
-        // Clicking an album track plays that exact song via a catalog deep link
-        // (DashboardViewModel.PlayAlbumTrackCommand) rather than walking SMTC's relative
-        // previous/next — the latter only reached the right song when Apple Music's queue was this
-        // album in order, and landed on an unrelated track on a discovery station or shuffled
-        // playlist. The launcher shares the catalog layer's storefront provider.
+        // Clicking an album track plays that exact song, and each row's Play Next / Play Last
+        // buttons queue it (DashboardViewModel's album-track commands). Both go through
+        // AppleMusicPlaybackController, which navigates via a catalog deep link (the launcher, which
+        // shares the catalog layer's storefront provider) and then drives the Apple Music app's own
+        // UI — the app never autoplays from a link, and SMTC exposes no play-this-track or queue
+        // verb, so the app UI is the only surface that can choose a track or touch the queue. That
+        // app-driving step is intrusive (it foregrounds and takes over Apple Music), so it's gated
+        // behind an opt-in the controller reads live from settings; with it off, clicking a track
+        // just opens the album.
         var dashboardViewModel = new DashboardViewModel(
             _coordinator, uiThreadInvoker: action => Dispatcher.BeginInvoke(action), settingsManager: _settingsManager,
-            trackLauncher: new AppleMusicUriLauncher(storefrontProvider));
+            playbackController: new AppleMusicPlaybackController(
+                new AppleMusicUriLauncher(storefrontProvider),
+                () => _settingsManager.Current.ControlAppleMusicApp));
         var settingsViewModel = new SettingsViewModel(_settingsManager, _deviceController, _startupRegistration);
 
         // The album view rides along on the catalog layer's next-track prefetch — the album list

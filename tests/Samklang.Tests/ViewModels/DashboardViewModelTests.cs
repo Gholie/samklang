@@ -431,66 +431,107 @@ public class DashboardViewModelTests
         Assert.Equal([true, false, false], viewModel.AlbumTracks.Select(entry => entry.IsCurrent));
     }
 
-    // --- Clicking an album track (PlayAlbumTrackCommand) ---
+    // --- Playing / queuing an album track (album-track commands) ---
 
-    private sealed class FakeAppleMusicTrackLauncher : IAppleMusicTrackLauncher
+    private sealed class FakePlaybackController : IAppleMusicPlaybackController
     {
-        public List<(string CatalogId, string AlbumId)> Played { get; } = [];
+        public List<(AlbumTrackTarget Target, QueuePlacement Placement)> Invocations { get; } = [];
 
-        public Task PlayTrackAsync(string catalogTrackId, string albumId)
+        public Task PlayAlbumTrackAsync(AlbumTrackTarget target, QueuePlacement placement)
         {
-            Played.Add((catalogTrackId, albumId));
+            Invocations.Add((target, placement));
             return Task.CompletedTask;
         }
     }
 
-    private static (DashboardViewModel ViewModel, FakeTrackWatcher Watcher, FakeAppleMusicTrackLauncher Launcher) CreateSutWithLauncher()
+    private static (DashboardViewModel ViewModel, FakeTrackWatcher Watcher, FakePlaybackController Controller) CreateSutWithController(
+        bool appControlEnabled = true)
     {
         var watcher = new FakeTrackWatcher();
         var resolver = new FakeResolver(new FormatResolution(new DeviceFormat(44_100, 24), ResolutionConfidence.Fallback, "Tier fallback"));
         var coordinator = new TrackSyncCoordinator(watcher, resolver, new FakeDeviceController(), new FakeRestingFormatReverter());
-        var launcher = new FakeAppleMusicTrackLauncher();
-        var viewModel = new DashboardViewModel(coordinator, trackLauncher: launcher);
-        return (viewModel, watcher, launcher);
+        var controller = new FakePlaybackController();
+        // The album-track play/queue actions drive the Apple Music app, which is opt-in
+        // (Settings.ControlAppleMusicApp); default this to on so the play/queue tests exercise the
+        // enabled path, and pass false to cover the opted-out behavior.
+        var settingsManager = new SettingsManager(new FakeSettingsStore());
+        settingsManager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        settingsManager.UpdateControlAppleMusicApp(appControlEnabled);
+        var viewModel = new DashboardViewModel(coordinator, settingsManager: settingsManager, playbackController: controller);
+        return (viewModel, watcher, controller);
     }
 
     [Fact]
-    public void Clicking_a_track_plays_it_in_its_album_context()
+    public void Clicking_a_track_plays_that_exact_song()
     {
-        // FakeAppleMusicTrackLauncher completes synchronously, so PlayAlbumTrackCommand's
-        // fire-and-forget call (see PlayTrackAsync) runs to completion within Execute. Both the
-        // song id and its album id are handed over so playback continues through the album.
-        var (viewModel, watcher, launcher) = CreateSutWithLauncher();
+        // FakePlaybackController completes synchronously, so PlayAlbumTrackCommand's fire-and-forget
+        // call (see InvokeAlbumTrackAsync) runs to completion within Execute. The row's number,
+        // title and ids are handed over so the controller can navigate to and play that exact song.
+        var (viewModel, watcher, controller) = CreateSutWithController();
         watcher.Fire(new Track("Track One", "Artist", "Album"));
         viewModel.OnAlbumTracksAvailable(Album);
 
         var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Three");
         viewModel.PlayAlbumTrackCommand.Execute(target);
 
-        Assert.Equal([("id-3", "album-1")], launcher.Played);
+        Assert.Equal(
+            [(new AlbumTrackTarget(3, "Track Three", "id-3", "album-1"), QueuePlacement.PlayNow)],
+            controller.Invocations);
     }
 
     [Fact]
     public void Clicking_a_track_plays_the_right_song_even_when_it_is_not_the_next_or_previous_row()
     {
-        // The bug this fixes: the old walk-based navigation assumed the play queue was this album
-        // in order, so on a discovery station or shuffled playlist it landed on an unrelated song.
-        // Deep-linking by catalog id is queue-independent — the exact clicked song is played
-        // regardless of how far it sits from the currently-flagged row.
-        var (viewModel, watcher, launcher) = CreateSutWithLauncher();
+        // The bug the deep-link approach fixed: the old walk-based navigation assumed the play queue
+        // was this album in order, so on a discovery station or shuffled playlist it landed on an
+        // unrelated song. Targeting the exact catalog track is queue-independent — the clicked song
+        // plays regardless of how far it sits from the currently-flagged row.
+        var (viewModel, watcher, controller) = CreateSutWithController();
         watcher.Fire(new Track("Track One", "Artist", "Album"));
         viewModel.OnAlbumTracksAvailable(Album);
 
         var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Two");
         viewModel.PlayAlbumTrackCommand.Execute(target);
 
-        Assert.Equal([("id-2", "album-1")], launcher.Played);
+        Assert.Equal(
+            [(new AlbumTrackTarget(2, "Track Two", "id-2", "album-1"), QueuePlacement.PlayNow)],
+            controller.Invocations);
+    }
+
+    [Fact]
+    public void Play_next_button_queues_the_track_at_the_top_of_the_queue()
+    {
+        var (viewModel, watcher, controller) = CreateSutWithController();
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Three");
+        viewModel.PlayTrackNextCommand.Execute(target);
+
+        Assert.Equal(
+            [(new AlbumTrackTarget(3, "Track Three", "id-3", "album-1"), QueuePlacement.PlayNext)],
+            controller.Invocations);
+    }
+
+    [Fact]
+    public void Play_last_button_appends_the_track_to_the_end_of_the_queue()
+    {
+        var (viewModel, watcher, controller) = CreateSutWithController();
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Two");
+        viewModel.PlayTrackLastCommand.Execute(target);
+
+        Assert.Equal(
+            [(new AlbumTrackTarget(2, "Track Two", "id-2", "album-1"), QueuePlacement.PlayLast)],
+            controller.Invocations);
     }
 
     [Fact]
     public void Clicking_the_currently_playing_track_is_disabled()
     {
-        var (viewModel, watcher, _) = CreateSutWithLauncher();
+        var (viewModel, watcher, _) = CreateSutWithController();
         watcher.Fire(new Track("Track Two", "Artist", "Album"));
         viewModel.OnAlbumTracksAvailable(Album);
 
@@ -500,19 +541,36 @@ public class DashboardViewModelTests
     }
 
     [Fact]
+    public void Queue_buttons_stay_enabled_for_the_currently_playing_row()
+    {
+        // Unlike the row-click Play, "Play Next"/"Play Last" on the current track are valid (queue
+        // it up again), so they must not be disabled the way the row-click is.
+        var (viewModel, watcher, _) = CreateSutWithController();
+        watcher.Fire(new Track("Track Two", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        var current = viewModel.AlbumTracks.Single(entry => entry.IsCurrent);
+
+        Assert.True(viewModel.PlayTrackNextCommand.CanExecute(current));
+        Assert.True(viewModel.PlayTrackLastCommand.CanExecute(current));
+    }
+
+    [Fact]
     public void Playing_a_track_is_disabled_for_a_null_parameter()
     {
         // Guards against a stray CanExecute probe with no CommandParameter bound yet (e.g. WPF's
         // own CommandManager requery) rather than assuming a row is always supplied.
-        var (viewModel, watcher, _) = CreateSutWithLauncher();
+        var (viewModel, watcher, _) = CreateSutWithController();
         watcher.Fire(new Track("Track One", "Artist", "Album"));
         viewModel.OnAlbumTracksAvailable(Album);
 
         Assert.False(viewModel.PlayAlbumTrackCommand.CanExecute(null));
+        Assert.False(viewModel.PlayTrackNextCommand.CanExecute(null));
+        Assert.False(viewModel.PlayTrackLastCommand.CanExecute(null));
     }
 
     [Fact]
-    public void Playing_a_track_is_disabled_without_a_launcher()
+    public void Album_track_commands_are_disabled_without_a_controller()
     {
         var (viewModel, watcher, _, _) = CreateSut();
         watcher.Fire(new Track("Track One", "Artist", "Album"));
@@ -521,6 +579,64 @@ public class DashboardViewModelTests
         var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Two");
 
         Assert.False(viewModel.PlayAlbumTrackCommand.CanExecute(target));
+        Assert.False(viewModel.PlayTrackNextCommand.CanExecute(target));
+        Assert.False(viewModel.PlayTrackLastCommand.CanExecute(target));
+    }
+
+    [Fact]
+    public void Queue_commands_are_disabled_when_app_control_is_off()
+    {
+        // The Play Next / Play Last actions only work by driving the app, so without the opt-in
+        // they're disabled (and their buttons hidden) — but the row-click Play still works: with app
+        // control off it falls back to just opening the album via the controller.
+        var (viewModel, watcher, _) = CreateSutWithController(appControlEnabled: false);
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Two");
+
+        Assert.False(viewModel.IsAppControlEnabled);
+        Assert.False(viewModel.PlayTrackNextCommand.CanExecute(target));
+        Assert.False(viewModel.PlayTrackLastCommand.CanExecute(target));
+        Assert.True(viewModel.PlayAlbumTrackCommand.CanExecute(target));
+    }
+
+    [Fact]
+    public void Clicking_a_track_still_invokes_the_controller_when_app_control_is_off()
+    {
+        // With app control off the controller navigates only (opens the album); the view model still
+        // hands the click to it — the navigate-or-drive decision lives in the controller, not here.
+        var (viewModel, watcher, controller) = CreateSutWithController(appControlEnabled: false);
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+
+        var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Three");
+        viewModel.PlayAlbumTrackCommand.Execute(target);
+
+        Assert.Equal(
+            [(new AlbumTrackTarget(3, "Track Three", "id-3", "album-1"), QueuePlacement.PlayNow)],
+            controller.Invocations);
+    }
+
+    [Fact]
+    public void Toggling_app_control_on_in_settings_enables_the_queue_commands_live()
+    {
+        var watcher = new FakeTrackWatcher();
+        var resolver = new FakeResolver(new FormatResolution(new DeviceFormat(44_100, 24), ResolutionConfidence.Fallback, "Tier fallback"));
+        var coordinator = new TrackSyncCoordinator(watcher, resolver, new FakeDeviceController(), new FakeRestingFormatReverter());
+        var settingsManager = new SettingsManager(new FakeSettingsStore());
+        settingsManager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        settingsManager.UpdateControlAppleMusicApp(false);
+        var viewModel = new DashboardViewModel(coordinator, settingsManager: settingsManager, playbackController: new FakePlaybackController());
+        watcher.Fire(new Track("Track One", "Artist", "Album"));
+        viewModel.OnAlbumTracksAvailable(Album);
+        var target = viewModel.AlbumTracks.Single(entry => entry.Title == "Track Two");
+        Assert.False(viewModel.PlayTrackNextCommand.CanExecute(target));
+
+        settingsManager.UpdateControlAppleMusicApp(true);
+
+        Assert.True(viewModel.IsAppControlEnabled);
+        Assert.True(viewModel.PlayTrackNextCommand.CanExecute(target));
     }
 
     // --- Switch-log toggle ---

@@ -26,6 +26,14 @@ namespace Samklang.SettingsManagement;
 /// to false (off) — detailed logging is opt-in — which is also what settings.json files persisted
 /// before the property existed deserialize to.
 /// </para>
+/// <para>
+/// <paramref name="ControlAppleMusicApp"/> opts into the album-track play/queue actions that drive
+/// the Apple Music app through UI Automation (clicking a song to play it, and the per-row Play Next
+/// / Play Last buttons — see <see cref="Sessions.AppleMusicPlaybackController"/>). It is off by
+/// default because it is intrusive: it briefly takes over the app and brings it to the foreground.
+/// With it off, clicking a song only opens its album (a plain deep link) and the queue buttons are
+/// hidden. Missing from older settings.json files deserializes to false, keeping the feature opt-in.
+/// </para>
 /// </summary>
 public sealed record Settings(
     DeviceFormat RestingFormat,
@@ -36,7 +44,8 @@ public sealed record Settings(
     TierSampleRateMapping? TierSampleRates = null,
     bool RichNowPlaying = true,
     bool ShowSwitchLog = false,
-    bool EnableDetailedLogging = false)
+    bool EnableDetailedLogging = false,
+    bool ControlAppleMusicApp = false)
 {
     /// <summary>The Grace Period new Settings are seeded with on first run, per docs/PLAN.md.</summary>
     public static readonly TimeSpan DefaultGracePeriod = TimeSpan.FromSeconds(30);

@@ -413,6 +413,7 @@
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
 
                                                 <!-- Track number, de-emphasized — the artwork and title carry the row. -->
@@ -469,6 +470,40 @@
                                                 <TextBlock Grid.Column="3" Text="{Binding DurationDisplay}" FontSize="12"
                                                            Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                                            VerticalAlignment="Center" />
+
+                                                <!-- Per-row queue actions (Play Next / Play Last), driving the Apple Music
+                                                     app's own context-menu items via Dashboard's commands. Only shown when
+                                                     the user has opted into controlling the app (Dashboard.IsAppControlEnabled);
+                                                     hidden entirely otherwise, since queuing only works by driving the app.
+                                                     When shown, space is reserved always (a hover-driven Opacity, not
+                                                     Visibility) so revealing them doesn't jog the row's layout; they fade in
+                                                     when the row is hovered. Their own click is handled by the buttons, and
+                                                     ItemClickBehavior also ignores row clicks originating on a button, so
+                                                     neither also plays the row. Commands (and the visibility flag) live on
+                                                     Dashboard, reached the same RelativeSource-to-Window way the row-click
+                                                     command is. -->
+                                                <StackPanel Grid.Column="4" Orientation="Horizontal"
+                                                            VerticalAlignment="Center" Margin="12,0,0,0"
+                                                            Visibility="{Binding DataContext.Dashboard.IsAppControlEnabled, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Converter={StaticResource BoolToVis}}">
+                                                    <StackPanel.Style>
+                                                        <Style TargetType="StackPanel">
+                                                            <Setter Property="Opacity" Value="0" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType={x:Type ListViewItem}}}" Value="True">
+                                                                    <Setter Property="Opacity" Value="1" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </StackPanel.Style>
+                                                    <ui:Button Icon="{ui:SymbolIcon ArrowNext24}" ToolTip="Play Next"
+                                                               Command="{Binding DataContext.Dashboard.PlayTrackNextCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                               CommandParameter="{Binding}"
+                                                               Width="32" Height="32" CornerRadius="16" Padding="0" />
+                                                    <ui:Button Icon="{ui:SymbolIcon TextBulletListSquare24}" ToolTip="Play Last"
+                                                               Command="{Binding DataContext.Dashboard.PlayTrackLastCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                               CommandParameter="{Binding}"
+                                                               Width="32" Height="32" CornerRadius="16" Padding="0" Margin="6,0,0,0" />
+                                                </StackPanel>
                                             </Grid>
                                         </DataTemplate>
                                     </ListView.ItemTemplate>
@@ -561,6 +596,17 @@
                             <TextBlock Text="Dolby Atmos:" Width="160" VerticalAlignment="Center" />
                             <TextBox Text="{Binding DolbyAtmosHzText, UpdateSourceTrigger=PropertyChanged}" Width="90" />
                         </StackPanel>
+                    </StackPanel>
+
+                    <TextBlock Text="Playback" FontWeight="Bold" Margin="0,0,0,8" />
+                    <StackPanel Margin="0,0,0,16">
+                        <!-- Applies immediately (no Save needed), like the other toggles. Off by default —
+                             this is intrusive (it takes over the Apple Music app), so it's opt-in. -->
+                        <CheckBox Content="Play songs from the album list (experimental)"
+                                  IsChecked="{Binding ControlAppleMusicAppEnabled}" />
+                        <TextBlock Text="When on, Samklang briefly takes over the Apple Music app to play a song (or add it with Play Next / Play Last), so the app pops to the front for a moment. When off, clicking a song just opens its album so you can press play yourself."
+                                   FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   TextWrapping="Wrap" Margin="28,2,0,0" />
                     </StackPanel>
 
                     <TextBlock Text="Now Playing" FontWeight="Bold" Margin="0,0,0,8" />

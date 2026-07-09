@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 
 namespace Samklang;
 
@@ -59,11 +60,34 @@ public static class ItemClickBehavior
             return;
         }
 
+        // A row can carry its own buttons (the album track list's Play Next / Play Last) whose
+        // MouseLeftButtonUp bubbles up to the row: swallow the row-level click when it originated on
+        // one of those, so clicking Play Next doesn't also fire the row's Play command.
+        if (e.OriginalSource is DependencyObject origin && IsWithinButton(origin, element))
+        {
+            return;
+        }
+
         var command = GetCommand(element);
         var parameter = GetCommandParameter(element);
         if (command is not null && command.CanExecute(parameter))
         {
             command.Execute(parameter);
         }
+    }
+
+    private static bool IsWithinButton(DependencyObject origin, UIElement stopAt)
+    {
+        // Fully-qualified: System.Windows.Forms is also referenced (the tray icon) and has its own
+        // ButtonBase, so the bare name is ambiguous — see this project's Forms/WPF type-clash note.
+        for (DependencyObject? node = origin; node is not null && node != stopAt; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is System.Windows.Controls.Primitives.ButtonBase)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
