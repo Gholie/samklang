@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/Gholie/samklang/compare/v1.4.1...v1.5.0) (2026-07-09)
+
+
+### Features
+
+* **playback:** play and queue album tracks via the Apple Music app (opt-in) ([#61](https://github.com/Gholie/samklang/issues/61)) ([e5dd646](https://github.com/Gholie/samklang/commit/e5dd646f67ff85f4c8ebc35dfd4d7097ffaebc4f))
+
 ## [1.4.1](https://github.com/Gholie/samklang/compare/v1.4.0...v1.4.1) (2026-07-08)
 
 
