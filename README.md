@@ -22,6 +22,16 @@
 
 Windows resamples every app's audio to the device's shared-mode format — the "Default Format" in the Sound control panel. If that's set to 48 kHz and Apple Music plays a 96 kHz hi-res track, you're not hearing hi-res, you're hearing a resample. Samklang watches what's playing and retunes the device so the track and the device agree — then quietly steps back out of the way when the music stops.
 
+## More than matching
+
+The dashboard isn't only a status readout — it doubles as a light album browser, which pays off exactly when you've stumbled onto something good in a playlist, a radio station, or a shared link.
+
+- **See the album behind whatever's playing.** Once a track is matched in the catalog, Samklang fetches its full album track list and shows it under **Playing Next**, with the current song highlighted. So a single great track from a playlist immediately shows you the record it came from — no leaving the tray app to go dig for it.
+- **Jump to any track.** Click a row to play that song. It plays *in album context* — Apple Music carries on through the rest of the album afterwards instead of playing the one song in isolation — so liking one track from a playlist is a single click into the whole album.
+- **Queue without losing your place.** Hover a row for **Play Next** (slot it right after the current song) and **Play Last** (send it to the end of the queue), so you can line tracks up from the album without interrupting what's on now.
+
+These app-driving actions are **opt-in**, behind the *Play songs from the album list (experimental)* toggle in Settings. With it off, clicking a track just opens its album in Apple Music so you can press play yourself, and the queue buttons stay hidden — nothing reaches into the app without your say-so. Why it has to work this way is in [Under the hood](#under-the-hood).
+
 ## Install
 
 1. Grab the latest installer from the [Releases page](https://github.com/Gholie/samklang/releases) — download the `Samklang-win-Setup.exe` asset from the newest release. Releases are [immutable](https://docs.github.com/en/repositories/releasing-projects-on-github/immutable-releases) and every asset is attested by GitHub at publish time — verify a download with `gh attestation verify Samklang-win-Setup.exe --repo Gholie/samklang --predicate-type https://in-toto.io/attestation/release/v0.1`.
@@ -89,7 +99,9 @@ The project's vocabulary is defined in [CONTEXT.md](CONTEXT.md); load-bearing de
 
 **Switching a live device is fiddly.** Probing which rates a device supports has to be done in exclusive mode using the device's *own* format layout, and extensible formats misreport their bit depth unless you read the valid-bits field specifically — get either wrong and you either reject rates the device supports or apply ones it doesn't. Format changes are clamped to the probed set and applied through Core Audio policy configuration.
 
-**There's no play queue and no "play this track" button.** SMTC exposes no upcoming queue, so seamless switching at track boundaries is predicted from album order: after each catalog match, the next track's format is resolved into a one-slot buffer in the background, making the boundary switch instant when the prediction holds. And Apple Music deep links never autoplay — there's no queue URL and no SMTC verb to start a chosen track — so the opt-in "play this album track / Play Next / Play Last" feature drives the Apple Music app itself through UI Automation, working around row virtualization and menu scoping to find and click the right control.
+**There's no play queue, and no "play this track" button.** Two related gaps, both behind the album-browsing feature above. First, SMTC exposes no *upcoming* queue, so the seamless switch at a track boundary is predicted from album order: after each catalog match Samklang fetches the album's track list and resolves the *next* track's format into a one-slot buffer in the background, so the boundary switch is instant whenever the prediction holds. That same fetched track list is what the dashboard shows under **Playing Next**.
+
+Second, nothing Apple exposes will actually *start* a chosen track. Deep links only navigate — the app never autoplays from a link, verified on the shipping build — there's no queue URL parameter, and SMTC offers only relative previous/next with no queue verb. So the opt-in play/queue feature drives the Apple Music app itself through Windows UI Automation: navigate to the album with an album-context deep link, find the track's row by its accessibility name (realizing it first when virtualization has parked it off-screen in a long album), open the row's *More* menu, and invoke *Play* / *Play Next* / *Play Last*. The fragile string-matching part — which row, which menu item — is factored out and unit-tested; the raw element-walking stays a thin, untested adapter. Every failure mode (the app restructured its tree, a non-English menu, a timing race) degrades to "album left open, press play yourself" — the exact pre-feature behavior, never an error in your face.
 
 ## Building from source
 
