@@ -37,6 +37,7 @@ public sealed class SettingsViewModel : ViewModelBase
     private bool _richNowPlayingEnabled = true;
     private bool _showSwitchLogEnabled;
     private bool _enableDetailedLoggingEnabled;
+    private bool _controlAppleMusicAppEnabled;
     private string _statusMessage = string.Empty;
 
     public SettingsViewModel(SettingsManager settingsManager, IDeviceController deviceController, IStartupRegistration startupRegistration)
@@ -202,6 +203,28 @@ public sealed class SettingsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Opts into driving the Apple Music app (clicking a song to play it, and the per-row Play Next
+    /// / Play Last buttons) — see <see cref="SettingsManagement.Settings.ControlAppleMusicApp"/>.
+    /// Off by default because it's intrusive: it briefly takes over the app and brings it to the
+    /// foreground. Applies immediately rather than waiting for <see cref="SaveCommand"/>, like
+    /// <see cref="RichNowPlayingEnabled"/>, so the dashboard shows/hides the queue buttons the moment
+    /// it's clicked.
+    /// </summary>
+    public bool ControlAppleMusicAppEnabled
+    {
+        get => _controlAppleMusicAppEnabled;
+        set
+        {
+            if (!SetField(ref _controlAppleMusicAppEnabled, value) || _isLoading)
+            {
+                return;
+            }
+
+            _settingsManager.UpdateControlAppleMusicApp(value);
+        }
+    }
+
     public string StatusMessage
     {
         get => _statusMessage;
@@ -245,6 +268,7 @@ public sealed class SettingsViewModel : ViewModelBase
             RichNowPlayingEnabled = settings.RichNowPlaying;
             ShowSwitchLogEnabled = settings.ShowSwitchLog;
             EnableDetailedLoggingEnabled = settings.EnableDetailedLogging;
+            ControlAppleMusicAppEnabled = settings.ControlAppleMusicApp;
 
             StatusMessage = string.Empty;
         }

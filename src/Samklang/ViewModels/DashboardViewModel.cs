@@ -37,7 +37,7 @@ public sealed class DashboardViewModel : ViewModelBase
     private readonly SettingsManager? _settingsManager;
     private readonly IClock _clock;
     private readonly Action<Action> _uiThreadInvoker;
-    private readonly IAppleMusicTrackLauncher? _trackLauncher;
+    private readonly IAppleMusicPlaybackController? _playbackController;
 
     /// <summary>
     /// The current album's tracks as last delivered by
@@ -61,6 +61,7 @@ public sealed class DashboardViewModel : ViewModelBase
     private bool _hasAlbumTracks;
     private string _albumTracksHeader = DefaultAlbumTracksHeader;
     private int _selectedTabIndex;
+    private bool _isAppControlEnabled;
 
     private const string DefaultAlbumTracksHeader = "Album";
 
@@ -69,19 +70,34 @@ public sealed class DashboardViewModel : ViewModelBase
         IClock? clock = null,
         Action<Action>? uiThreadInvoker = null,
         SettingsManager? settingsManager = null,
-        IAppleMusicTrackLauncher? trackLauncher = null)
+        IAppleMusicPlaybackController? playbackController = null)
     {
         _coordinator = coordinator;
         _settingsManager = settingsManager;
         _clock = clock ?? new SystemClock();
         _uiThreadInvoker = uiThreadInvoker ?? (action => action());
-        _trackLauncher = trackLauncher;
+        _playbackController = playbackController;
 
         _coordinator.PropertyChanged += OnCoordinatorPropertyChanged;
 
+        // The album-track play/queue actions drive the Apple Music app, which is opt-in (see
+        // Settings.ControlAppleMusicApp). Seed the live flag from the setting and track it so
+        // toggling it in the Settings page shows/hides the queue buttons without a restart.
+        _isAppControlEnabled = _settingsManager?.Current.ControlAppleMusicApp ?? false;
+        if (_settingsManager is not null)
+        {
+            _settingsManager.PropertyChanged += OnSettingsChanged;
+        }
+
         PlayAlbumTrackCommand = new RelayCommand<AlbumTrackEntry>(
-            entry => _ = PlayTrackAsync(entry),
-            CanPlayTrack);
+            entry => _ = InvokeAlbumTrackAsync(entry, QueuePlacement.PlayNow),
+            entry => CanInvokeAlbumTrack(entry, QueuePlacement.PlayNow));
+        PlayTrackNextCommand = new RelayCommand<AlbumTrackEntry>(
+            entry => _ = InvokeAlbumTrackAsync(entry, QueuePlacement.PlayNext),
+            entry => CanInvokeAlbumTrack(entry, QueuePlacement.PlayNext));
+        PlayTrackLastCommand = new RelayCommand<AlbumTrackEntry>(
+            entry => _ = InvokeAlbumTrackAsync(entry, QueuePlacement.PlayLast),
+            entry => CanInvokeAlbumTrack(entry, QueuePlacement.PlayLast));
 
         Refresh(appendHistoryEntry: false);
 
@@ -107,19 +123,31 @@ public sealed class DashboardViewModel : ViewModelBase
     public ObservableCollection<AlbumTrackEntry> AlbumTracks { get; } = [];
 
     /// <summary>
-    /// Clicking an album-track row plays that exact song in its album context. It hands the row's
-    /// Apple Music catalog id (and album id) to <see cref="IAppleMusicTrackLauncher"/>, which
-    /// deep-links straight to the track within the album — so the right song plays no matter what
-    /// the queue is (a discovery station, a shuffled playlist, or the album itself), and playback
-    /// then continues through the rest of that album rather than back to whatever was playing
-    /// before. This deliberately replaces the original relative-skip walk over
-    /// <see cref="IMediaTransport"/>: SMTC exposes no "play this track" verb (see docs/CONTEXT.md's
-    /// Next Track Buffer note, "SMTC exposes no play queue"), so walking Previous/Next only reached
-    /// the right song when the queue *was* this album in album order and landed on an unrelated song
-    /// otherwise — the reported bug. Disabled (see <see cref="CanPlayTrack"/>) when there's no
-    /// launcher, the clicked row already is the current one, or the row has no catalog id to play.
+    /// Clicking an album-track row plays that exact song. It hands the row to
+    /// <see cref="IAppleMusicPlaybackController"/>, which navigates the Apple Music app to the album
+    /// and then drives the app's own UI to play the track — because the app never autoplays from a
+    /// deep link (verified on the shipping build), and SMTC exposes no "play this track" verb (see
+    /// docs/CONTEXT.md's "SMTC exposes no play queue"). Playback then continues through the rest of
+    /// the album. When app control is off (<see cref="IsAppControlEnabled"/>) the controller stops
+    /// after navigating, so this simply opens the album for the user to press play — hence this
+    /// command stays enabled either way. Disabled (see <see cref="CanInvokeAlbumTrack"/>) only when
+    /// there's no controller, the clicked row already is the current one, or the row lacks the ids
+    /// needed to reach it.
     /// </summary>
     public RelayCommand<AlbumTrackEntry> PlayAlbumTrackCommand { get; }
+
+    /// <summary>
+    /// Inserts the row's track at the top of the Apple Music queue ("Play Next"), right after the
+    /// current song — the app's own per-track context-menu action, reached through
+    /// <see cref="IAppleMusicPlaybackController"/> (no URL or SMTC verb exposes the queue). Unlike
+    /// the row-click Play, this stays enabled for every row, including the one playing — but only
+    /// while app control is on (<see cref="IsAppControlEnabled"/>), since queuing has no meaning
+    /// without driving the app; its button is hidden otherwise.
+    /// </summary>
+    public RelayCommand<AlbumTrackEntry> PlayTrackNextCommand { get; }
+
+    /// <summary>Appends the row's track to the end of the Apple Music queue ("Play Last") — the sibling of <see cref="PlayTrackNextCommand"/>.</summary>
+    public RelayCommand<AlbumTrackEntry> PlayTrackLastCommand { get; }
 
     /// <summary>True while <see cref="AlbumTracks"/> has content; the album view shows a placeholder hint otherwise.</summary>
     public bool HasAlbumTracks
@@ -146,6 +174,20 @@ public sealed class DashboardViewModel : ViewModelBase
     {
         get => _selectedTabIndex;
         set => SetField(ref _selectedTabIndex, value);
+    }
+
+    /// <summary>
+    /// Whether the user has opted into driving the Apple Music app (see
+    /// <see cref="Settings.ControlAppleMusicApp"/>). Tracks the setting live. The per-row Play Next
+    /// / Play Last buttons bind their visibility to this (they're hidden when off, since queuing
+    /// only works by driving the app), and the queue commands are gated on it — see
+    /// <see cref="CanInvokeAlbumTrack"/>. The row-click Play is not gated: with app control off it
+    /// still opens the album via the controller's navigate-only fallback.
+    /// </summary>
+    public bool IsAppControlEnabled
+    {
+        get => _isAppControlEnabled;
+        private set => SetField(ref _isAppControlEnabled, value);
     }
 
     public string TrackDisplay
@@ -236,6 +278,14 @@ public sealed class DashboardViewModel : ViewModelBase
         _uiThreadInvoker(() => Refresh(
             appendHistoryEntry: e.PropertyName == nameof(TrackSyncCoordinator.Resolution),
             trackChanged: e.PropertyName == nameof(TrackSyncCoordinator.CurrentTrack)));
+
+    /// <summary>
+    /// Re-reads the app-control opt-in whenever settings change, so toggling it in the Settings page
+    /// shows/hides the queue buttons (and flips row-click between play and open-album) live. Marshaled
+    /// through the UI-thread invoker like every other reaction, since it touches a bound property.
+    /// </summary>
+    private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e) =>
+        _uiThreadInvoker(() => IsAppControlEnabled = _settingsManager?.Current.ControlAppleMusicApp ?? false);
 
     private void Refresh(bool appendHistoryEntry, bool trackChanged = false)
     {
@@ -336,32 +386,42 @@ public sealed class DashboardViewModel : ViewModelBase
         AlbumTracksHeader = $"{DefaultAlbumTracksHeader} — {current.Album}";
     }
 
-    private bool CanPlayTrack(AlbumTrackEntry? entry) =>
+    /// <summary>
+    /// Shared gate for the three album-track actions. All need a controller, a row still in the
+    /// list, and the ids to reach it (catalog id + album id — the deep-link navigation the
+    /// controller starts with can't build an album link without them). The two queue actions
+    /// additionally require the app-control opt-in (<see cref="IsAppControlEnabled"/>), since they
+    /// only work by driving the app; the row-click Play needs no opt-in — with app control off it
+    /// falls back to just opening the album. Only the row-click Play is disabled for the
+    /// already-playing row; queuing the current track next/last is a valid choice, so those stay
+    /// enabled (when app control is on).
+    /// </summary>
+    private bool CanInvokeAlbumTrack(AlbumTrackEntry? entry, QueuePlacement placement) =>
         entry is not null
-        && !entry.IsCurrent
+        && _playbackController is not null
+        && !string.IsNullOrEmpty(entry.Title)
         && !string.IsNullOrEmpty(entry.CatalogId)
-        && _trackLauncher is not null
+        && !string.IsNullOrEmpty(entry.AlbumId)
+        && !(placement == QueuePlacement.PlayNow && entry.IsCurrent)
+        && (placement == QueuePlacement.PlayNow || _isAppControlEnabled)
         && AlbumTracks.IndexOf(entry) >= 0;
 
     /// <summary>
-    /// Deep-links Apple Music straight to <paramref name="entry"/>'s catalog track — see
-    /// <see cref="PlayAlbumTrackCommand"/>'s doc comment for why this replaced the old
-    /// relative-skip walk. Re-validates what <see cref="CanPlayTrack"/> checked: a row can leave
-    /// the list, or become the current one, between a click landing in the UI thread's queue and
-    /// this method actually running.
+    /// Hands <paramref name="entry"/> to the playback controller for the requested
+    /// <paramref name="placement"/> — see <see cref="PlayAlbumTrackCommand"/>'s doc comment for why
+    /// this drives the app's UI rather than a bare deep link. Re-validates what
+    /// <see cref="CanInvokeAlbumTrack"/> checked: a row can leave the list, or become the current
+    /// one, between a click landing in the UI thread's queue and this method actually running.
     /// </summary>
-    private async Task PlayTrackAsync(AlbumTrackEntry? entry)
+    private async Task InvokeAlbumTrackAsync(AlbumTrackEntry? entry, QueuePlacement placement)
     {
-        if (entry is null
-            || entry.IsCurrent
-            || string.IsNullOrEmpty(entry.CatalogId)
-            || _trackLauncher is null
-            || AlbumTracks.IndexOf(entry) < 0)
+        if (!CanInvokeAlbumTrack(entry, placement) || entry is null || _playbackController is null)
         {
             return;
         }
 
-        await _trackLauncher.PlayTrackAsync(entry.CatalogId, entry.AlbumId);
+        await _playbackController.PlayAlbumTrackAsync(
+            new AlbumTrackTarget(entry.Number, entry.Title, entry.CatalogId, entry.AlbumId), placement);
     }
 
     private void AppendHistoryEntry(FormatResolution resolution)

@@ -252,6 +252,42 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public void Construction_loads_the_control_apple_music_app_toggle_from_settings()
+    {
+        var settings = new Settings(
+            new DeviceFormat(44_100, 24),
+            Settings.DefaultGracePeriod,
+            DeviceTargetingMode.FollowDefault,
+            PinnedDeviceId: null,
+            ControlAppleMusicApp: true);
+        var settingsManager = CreateSettingsManager(settings);
+
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+
+        Assert.True(viewModel.ControlAppleMusicAppEnabled);
+        // Loading must not itself write the toggle back through the manager.
+        Assert.True(settingsManager.Current.ControlAppleMusicApp);
+    }
+
+    [Fact]
+    public void Toggling_control_apple_music_app_persists_immediately_without_the_save_command()
+    {
+        var settingsManager = CreateSettingsManager();
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+
+        // Off by default (opt-in).
+        Assert.False(viewModel.ControlAppleMusicAppEnabled);
+
+        viewModel.ControlAppleMusicAppEnabled = true;
+
+        Assert.True(settingsManager.Current.ControlAppleMusicApp);
+
+        viewModel.ControlAppleMusicAppEnabled = false;
+
+        Assert.False(settingsManager.Current.ControlAppleMusicApp);
+    }
+
+    [Fact]
     public void RefreshDevices_repopulates_available_devices_and_preserves_the_current_selection()
     {
         var settingsManager = CreateSettingsManager();

@@ -131,6 +131,20 @@ public sealed class SettingsManager(ISettingsStore store) : INotifyPropertyChang
         OnPropertyChanged(nameof(Current));
     }
 
+    /// <summary>
+    /// Updates and persists the "control the Apple Music app" toggle (see
+    /// <see cref="Settings.ControlAppleMusicApp"/>). Applies immediately rather than via
+    /// <see cref="UpdateFromSettingsView"/>, like the other toggles, so the dashboard shows/hides
+    /// the per-row queue buttons and switches clicking a song between play and open-album the moment
+    /// it's clicked.
+    /// </summary>
+    public void UpdateControlAppleMusicApp(bool enabled)
+    {
+        Current = Current with { ControlAppleMusicApp = enabled };
+        store.Save(Current);
+        OnPropertyChanged(nameof(Current));
+    }
+
     private void OnPropertyChanged(string propertyName) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

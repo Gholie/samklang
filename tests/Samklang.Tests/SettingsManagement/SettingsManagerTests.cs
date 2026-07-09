@@ -243,6 +243,50 @@ public class SettingsManagerTests
     }
 
     [Fact]
+    public void UpdateControlAppleMusicApp_persists_the_toggle_and_raises_PropertyChanged()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        var raisedCount = 0;
+        manager.PropertyChanged += (_, _) => raisedCount++;
+
+        manager.UpdateControlAppleMusicApp(true);
+
+        Assert.True(manager.Current.ControlAppleMusicApp);
+        Assert.Equal(manager.Current, store.Stored);
+        Assert.Equal(1, raisedCount);
+    }
+
+    [Fact]
+    public void LoadOrSeed_with_no_persisted_settings_seeds_control_apple_music_app_off()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+
+        var settings = manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+
+        Assert.False(settings.ControlAppleMusicApp);
+    }
+
+    /// <summary>
+    /// Back-compat: a settings.json persisted before ControlAppleMusicApp shipped has no such JSON
+    /// property — it must deserialize to the toggle's default (off), keeping this intrusive feature
+    /// opt-in for existing users rather than silently enabling it on update.
+    /// </summary>
+    [Fact]
+    public void Settings_json_without_a_control_apple_music_app_property_deserializes_to_off()
+    {
+        var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30), DeviceTargetingMode.FollowDefault, PinnedDeviceId: null);
+        var node = System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(settings))!.AsObject();
+        node.Remove(nameof(Settings.ControlAppleMusicApp));
+
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<Settings>(node.ToJsonString());
+
+        Assert.False(roundTripped!.ControlAppleMusicApp);
+    }
+
+    [Fact]
     public void UpdateFromSettingsView_leaves_the_switch_log_toggle_untouched()
     {
         var store = new FakeSettingsStore();
