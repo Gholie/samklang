@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/Gholie/samklang/compare/v1.5.0...v1.5.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* icons were slightly off kilter ([#63](https://github.com/Gholie/samklang/issues/63)) ([879f92e](https://github.com/Gholie/samklang/commit/879f92e571ec83515606ae25a754f0ff5aec1958))
+
 ## [1.5.0](https://github.com/Gholie/samklang/compare/v1.4.1...v1.5.0) (2026-07-09)
 
 
