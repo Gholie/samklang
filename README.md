@@ -40,8 +40,8 @@ These app-driving actions are **opt-in**, behind the *Play songs from the album 
 
 ### First run
 
-- Samklang starts minimized to the **system tray** (the icon area by the clock) — nothing pops up on first launch. Hover the icon for a tooltip with the current version, track, and applied format.
-- Left-click (or double-click) the tray icon to open the dashboard: the current track with album artwork, playback controls (previous / play-pause / next), and a subtle playing animation, alongside its resolved format, confidence, and recent switch history — plus a **Settings** tab for device targeting, tier mappings, resting format, grace period, and "Start with Windows." Prefer plain text? Untick **Rich now-playing view** in Settings.
+- Samklang opens its dashboard as soon as it launches: the current track with album artwork, playback controls (previous / play-pause / next), and a subtle playing animation, alongside its resolved format, confidence, and recent switch history — plus a **Settings** tab for device targeting, tier mappings, resting format, grace period, format switching, "Start with Windows," and "Start minimized to tray." Prefer plain text? Untick **Rich now-playing view** in Settings.
+- It also lives in the **system tray** (the icon area by the clock) for as long as it's running — hover the icon for a tooltip with the current version, track, and applied format. Closing the dashboard sends it back to the tray rather than quitting; left-click (or double-click) the tray icon to bring it back. Want it to start hidden instead of opening the dashboard every time? Tick **Start minimized to tray** in Settings.
 - Nothing needs configuring to get going: open Apple Music, play something, and Samklang picks up the track change and switches your default device's format automatically. Reach for Settings only if you want to pin a specific device, tweak tier→sample-rate mappings, or adjust the resting format and grace period.
 
 <div align="center">

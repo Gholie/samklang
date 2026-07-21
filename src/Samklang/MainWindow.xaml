@@ -580,11 +580,11 @@
 
                     <TextBlock Text="Format switching" FontWeight="Bold" Margin="0,0,0,8" />
                     <StackPanel Margin="0,0,0,16">
-                        <!-- A single mutually-exclusive choice (was two independent checkboxes, which let
-                             both be checked at once — pausing playback while also asking not to mute is a
-                             no-op combination, since nothing is being fed to the device once playback is
-                             paused, which was confusing). Applies immediately (no Save needed), like the
-                             other toggles. -->
+                        <!-- A single mutually-exclusive choice rather than two independent checkboxes
+                             (mute vs. don't, pause vs. don't), because pausing playback while also asking
+                             not to mute would be a no-op combination — nothing is being fed to the device
+                             once playback is paused — which would be confusing to expose as two separate
+                             toggles. Applies immediately (no Save needed), like the other toggles. -->
                         <RadioButton GroupName="FormatSwitchBehavior" Content="Mute through the switch (default)"
                                      IsChecked="{Binding IsMuteThroughSwitchMode}" />
                         <TextBlock Text="Samklang mutes the device right before switching the sample rate and unmutes it right after, so you get a brief silent gap instead of Windows' mute/rebuild hiccup."

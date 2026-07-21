@@ -2,11 +2,11 @@ namespace Samklang.SettingsManagement;
 
 /// <summary>
 /// What happens to Apple Music playback and the device's mute state around a device format
-/// switch. Previously two independent booleans (<c>PauseDuringFormatSwitch</c> and
-/// <c>KeepFeedingAudioDuringFormatSwitch</c>), which let both be enabled at once — pausing
-/// playback while also asking not to mute is a no-op combination (nothing is being fed to the
-/// device once playback is paused), which was confusing in the settings UI. A single choice
-/// makes the three actually-distinct behaviors mutually exclusive.
+/// switch. Modeled as one three-way choice rather than two independent booleans (mute vs.
+/// don't, pause vs. don't) because two of the four combinations those booleans would allow are
+/// degenerate: pausing playback while also asking not to mute is a no-op combination (nothing is
+/// being fed to the device once playback is paused), which would be confusing to expose in the
+/// settings UI. A single choice keeps the three actually-distinct behaviors mutually exclusive.
 /// </summary>
 public enum FormatSwitchBehavior
 {
