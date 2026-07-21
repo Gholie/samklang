@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Samklang.Devices;
 using Samklang.Domain;
 using Samklang.SettingsManagement;
@@ -237,9 +238,11 @@ public sealed class SettingsViewModel : ViewModelBase
     /// response fire their own setters too, but with no persisted enum value for "off" there is
     /// nothing for those calls to do.
     /// </summary>
-    private void SetFormatSwitchBehaviorMode(ref bool field, bool value, FormatSwitchBehavior behavior)
+    private void SetFormatSwitchBehaviorMode(
+        ref bool field, bool value, FormatSwitchBehavior behavior,
+        [CallerMemberName] string? propertyName = null)
     {
-        if (!SetField(ref field, value) || _isLoading || !value)
+        if (!SetField(ref field, value, propertyName) || _isLoading || !value)
         {
             return;
         }
