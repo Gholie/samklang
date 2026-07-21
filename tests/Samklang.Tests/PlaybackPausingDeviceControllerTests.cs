@@ -10,16 +10,53 @@ namespace Samklang.Tests;
 public class PlaybackPausingDeviceControllerTests
 {
     /// <summary>Completes instantly (no real wall-clock wait), so recovery-watch tests run fast
-    /// and deterministically instead of racing real <see cref="Task.Delay(TimeSpan)"/> timing.</summary>
+    /// and deterministically instead of racing real <see cref="Task.Delay(TimeSpan)"/> timing.
+    /// Still honors an already-cancelled token the same way <see cref="Task.Delay(TimeSpan,CancellationToken)"/>
+    /// would, so tests that pre-cancel a watch's token don't need a slower, real-waiting fake.</summary>
     private sealed class FakeDelay : IDelay
     {
         public int WaitCount { get; private set; }
 
-        public Task Wait(TimeSpan duration)
+        public Task Wait(TimeSpan duration, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             WaitCount++;
             return Task.CompletedTask;
         }
+    }
+
+    /// <summary>
+    /// A <see cref="IDelay"/> whose very first <see cref="Wait"/> call never completes on its own —
+    /// it parks there until either <see cref="ParkedCancellationToken"/> is cancelled or the test
+    /// times out waiting on <see cref="FirstPollReached"/>. Every later call (i.e. any watch
+    /// started after the first one) resolves immediately, like <see cref="FakeDelay"/>. This makes
+    /// it possible to deterministically simulate a second <see cref="PlaybackPausingDeviceController.ApplyTargetFormat"/>
+    /// superseding a first recovery watch that is still mid-poll, instead of racing two real
+    /// <see cref="Task.Run(Action)"/> background threads against the test's own thread.
+    /// </summary>
+    private sealed class FirstPollParkingDelay : IDelay
+    {
+        private readonly ManualResetEventSlim _firstPollReached = new(initialState: false);
+        private readonly TaskCompletionSource _firstPollGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _callCount;
+
+        public Task Wait(TimeSpan duration, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _callCount) > 1)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            }
+
+            cancellationToken.Register(() => _firstPollGate.TrySetCanceled(cancellationToken));
+            _firstPollReached.Set();
+            return _firstPollGate.Task;
+        }
+
+        /// <summary>Blocks the calling (test) thread until the first ever <see cref="Wait"/> call
+        /// has been made and is parked, so the test can be sure a second switch will find that
+        /// watch still in flight before it supersedes it.</summary>
+        public void WaitForFirstPoll() => Assert.True(_firstPollReached.Wait(TimeSpan.FromSeconds(5)));
     }
 
     private sealed class FakeDeviceController : IDeviceController
@@ -296,6 +333,73 @@ public class PlaybackPausingDeviceControllerTests
         Assert.True(switched);
         Assert.NotNull(controller.LastRecoveryTask);
         await controller.LastRecoveryTask!;
+        Assert.Equal(["toggle"], transport.Calls);
+    }
+
+    /// <summary>
+    /// Regression test for the "user presses pause right after a track change" false positive:
+    /// a track change is exactly when the recovery watch's window opens (it starts after every
+    /// real switch), so a pause the user genuinely intends must not get silently un-paused. Paused
+    /// first showing up at poll 8 of 10 — comfortably past <c>RecoveryBugWindowPollCount</c> —
+    /// reads as deliberate, unlike the diagnosed bug case which flipped on the very first poll.
+    /// </summary>
+    [Fact]
+    public async Task Recovery_does_not_resume_when_paused_first_appears_late_in_the_window()
+    {
+        var inner = new FakeDeviceController { Current = new DeviceFormat(48_000, 24) };
+        var transport = new FakeMediaTransport();
+        var callCount = 0;
+        // Call 0 is ApplyTargetFormat's own "was playing" check; calls 1-7 (polls 1-7) still
+        // report Playing, and Paused first appears on call 8 — poll 8 of 10.
+        PlaybackState? StateFn() => callCount++ < 8 ? PlaybackState.Playing : PlaybackState.Paused;
+        var controller = new PlaybackPausingDeviceController(inner, transport, StateFn, () => false, new FakeDelay());
+
+        var switched = controller.ApplyTargetFormat(new DeviceFormat(44_100, 24));
+
+        Assert.True(switched);
+        Assert.NotNull(controller.LastRecoveryTask);
+        await controller.LastRecoveryTask!;
+        Assert.Empty(transport.Calls);
+    }
+
+    /// <summary>
+    /// Regression test for the concurrent-watch double-toggle bug: two real switches inside the
+    /// ~1.5s recovery window used to leave two watches polling the same lagging SMTC state, and a
+    /// superseded watch could observe a stale <see cref="PlaybackState.Paused"/> left over from
+    /// before the newer switch's own watch had already resumed things — toggling again and leaving
+    /// playback paused. <see cref="FirstPollParkingDelay"/> keeps the first watch reliably parked
+    /// mid-poll (instead of racing two real background threads against this test) so the second
+    /// <see cref="PlaybackPausingDeviceController.ApplyTargetFormat"/> call is guaranteed to find it
+    /// still in flight and cancel it.
+    /// </summary>
+    [Fact]
+    public async Task Recovery_cancels_the_first_watch_when_a_second_switch_supersedes_it_within_the_window()
+    {
+        var inner = new FakeDeviceController { Current = new DeviceFormat(48_000, 24) };
+        var transport = new FakeMediaTransport();
+        var callCount = 0;
+        // The first two calls are the two ApplyTargetFormat calls' own "was playing" checks. The
+        // first watch never gets far enough to call currentPlaybackState at all — it's parked at
+        // its very first poll's Wait call (see FirstPollParkingDelay) when the second switch
+        // supersedes it — so every call after the first two belongs to the second watch.
+        PlaybackState? StateFn() => callCount++ < 2 ? PlaybackState.Playing : PlaybackState.Paused;
+        var delay = new FirstPollParkingDelay();
+        var controller = new PlaybackPausingDeviceController(inner, transport, StateFn, () => false, delay);
+
+        controller.ApplyTargetFormat(new DeviceFormat(44_100, 24));
+        var firstWatch = controller.LastRecoveryTask;
+        delay.WaitForFirstPoll();
+
+        controller.ApplyTargetFormat(new DeviceFormat(48_000, 24));
+        var secondWatch = controller.LastRecoveryTask;
+
+        Assert.NotSame(firstWatch, secondWatch);
+        await firstWatch!;
+        await secondWatch!;
+
+        // Exactly one resume toggle, from the surviving second watch. If the first watch weren't
+        // cancelled, it would eventually wake up, observe the same stale Paused state, and toggle
+        // again — undoing the second watch's correct resume and leaving playback paused.
         Assert.Equal(["toggle"], transport.Calls);
     }
 
