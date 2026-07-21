@@ -46,6 +46,29 @@ public sealed class SmtcTrackWatcher : ITrackWatcher, IMediaTransport, IDisposab
 
     public event EventHandler? ArtworkChanged;
 
+    public TimeSpan? PlaybackPosition
+    {
+        get
+        {
+            if (_attachedSession is not { } session)
+            {
+                return null;
+            }
+
+            try
+            {
+                return session.GetTimelineProperties().Position;
+            }
+            catch (Exception ex)
+            {
+                // Mirrors RefreshPlaybackState's handling: a session that disappears mid-read
+                // reads as "no position" rather than propagating a transient COM failure.
+                AppLog.Warn($"Failed to read playback position from the SMTC session: {ex.GetType().Name}: {ex.Message}", category: "TrackWatcher");
+                return null;
+            }
+        }
+    }
+
     public async Task StartAsync()
     {
         _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();

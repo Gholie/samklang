@@ -36,6 +36,8 @@ public class NowPlayingViewModelTests
         public byte[]? ArtworkBytes { get; private set; }
         public event EventHandler? ArtworkChanged;
 
+        public TimeSpan? PlaybackPosition => null;
+
         public int SkipPreviousCallCount { get; private set; }
         public int TogglePlayPauseCallCount { get; private set; }
         public int SkipNextCallCount { get; private set; }

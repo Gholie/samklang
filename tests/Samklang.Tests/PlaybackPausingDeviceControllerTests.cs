@@ -61,6 +61,12 @@ public class PlaybackPausingDeviceControllerTests
         public event EventHandler? ArtworkChanged { add { } remove { } }
         public List<string> Calls { get; } = [];
 
+        /// <summary>Queried by <see cref="PlaybackPausingDeviceController.WaitForPositionToAdvance"/>;
+        /// defaults to always-null (no position signal), matching a session with nothing to poll.</summary>
+        public Func<TimeSpan?> PositionProvider { get; set; } = () => null;
+
+        public TimeSpan? PlaybackPosition => PositionProvider();
+
         public Task SkipPreviousAsync() => Task.CompletedTask;
 
         public Task TogglePlayPauseAsync()
@@ -109,6 +115,7 @@ public class PlaybackPausingDeviceControllerTests
     {
         public byte[]? ArtworkBytes => null;
         public event EventHandler? ArtworkChanged { add { } remove { } }
+        public TimeSpan? PlaybackPosition => null;
 
         public Task SkipPreviousAsync() => Task.CompletedTask;
 
@@ -264,6 +271,7 @@ public class PlaybackPausingDeviceControllerTests
     {
         public byte[]? ArtworkBytes => null;
         public event EventHandler? ArtworkChanged { add { } remove { } }
+        public TimeSpan? PlaybackPosition => null;
 
         public Task SkipPreviousAsync() => Task.CompletedTask;
 
@@ -366,5 +374,74 @@ public class PlaybackPausingDeviceControllerTests
         // took exactly that many waits and then stopped, rather than looping forever.
         Assert.Equal(10, delay.WaitCount);
         Assert.Empty(transport.Calls);
+    }
+
+    /// <summary>
+    /// Regression test for issue #67: the proactive pause/resume path must not send the resume
+    /// command right after the inner switch returns — it should wait until playback position is
+    /// observed to have actually advanced past its value at that point, confirming Apple Music's
+    /// WASAPI stream is really producing audio again rather than just reporting Playing.
+    /// </summary>
+    [Fact]
+    public void ApplyTargetFormat_waits_for_playback_position_to_advance_before_resuming()
+    {
+        var inner = new FakeDeviceController { Current = new DeviceFormat(48_000, 24) };
+        var transport = new FakeMediaTransport();
+        var reads = 0;
+        // Read 0 is the baseline, taken right after the inner switch returns; reads 1-2 are polls
+        // that observe no advance yet; read 3 is the poll that finally observes it.
+        transport.PositionProvider = () => reads++ switch
+        {
+            0 or 1 or 2 => TimeSpan.FromSeconds(5),
+            _ => TimeSpan.FromSeconds(6),
+        };
+        var delay = new FakeDelay();
+        var controller = new PlaybackPausingDeviceController(
+            inner, transport, () => PlaybackState.Playing, () => true, delay);
+
+        var switched = controller.ApplyTargetFormat(new DeviceFormat(44_100, 24));
+
+        Assert.True(switched);
+        Assert.Equal(3, delay.WaitCount);
+        Assert.Equal(["toggle", "toggle"], transport.Calls);
+    }
+
+    /// <summary>Bounded-window regression mirroring the recovery watch's: if playback position
+    /// never advances, the resume command must still fire once the window is exhausted rather
+    /// than leaving Apple Music paused forever.</summary>
+    [Fact]
+    public void ApplyTargetFormat_resumes_anyway_if_playback_position_never_advances()
+    {
+        var inner = new FakeDeviceController { Current = new DeviceFormat(48_000, 24) };
+        var transport = new FakeMediaTransport { PositionProvider = () => TimeSpan.FromSeconds(5) };
+        var delay = new FakeDelay();
+        var controller = new PlaybackPausingDeviceController(
+            inner, transport, () => PlaybackState.Playing, () => true, delay);
+
+        var switched = controller.ApplyTargetFormat(new DeviceFormat(44_100, 24));
+
+        Assert.True(switched);
+        // Mirrors PlaybackPausingDeviceController's private PositionAdvancePollCount (10).
+        Assert.Equal(10, delay.WaitCount);
+        Assert.Equal(["toggle", "toggle"], transport.Calls);
+    }
+
+    /// <summary>When there's no position signal at all (no session, or the read fails), there's
+    /// nothing to poll for — the resume command should fire immediately, same as before this
+    /// feature existed, rather than always paying the full bounded window.</summary>
+    [Fact]
+    public void ApplyTargetFormat_resumes_immediately_when_no_playback_position_is_available()
+    {
+        var inner = new FakeDeviceController { Current = new DeviceFormat(48_000, 24) };
+        var transport = new FakeMediaTransport { PositionProvider = () => null };
+        var delay = new FakeDelay();
+        var controller = new PlaybackPausingDeviceController(
+            inner, transport, () => PlaybackState.Playing, () => true, delay);
+
+        var switched = controller.ApplyTargetFormat(new DeviceFormat(44_100, 24));
+
+        Assert.True(switched);
+        Assert.Equal(0, delay.WaitCount);
+        Assert.Equal(["toggle", "toggle"], transport.Calls);
     }
 }

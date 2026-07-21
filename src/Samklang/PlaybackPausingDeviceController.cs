@@ -14,7 +14,12 @@ namespace Samklang;
 /// reactive recovery watch after every other real switch (see <see cref="StartRecoveryWatch"/>)
 /// to work around a separate Apple Music bug: its own SMTC session sometimes reports itself
 /// <see cref="PlaybackState.Paused"/> after a shared-mode format switch invalidates its WASAPI
-/// stream, and does not auto-resume on its own, even when nothing asked it to pause.
+/// stream, and does not auto-resume on its own, even when nothing asked it to pause. On the
+/// proactive pause/resume path itself, the resume command isn't sent unconditionally right after
+/// the inner switch returns either: <see cref="WaitForPositionToAdvance"/> blocks it until
+/// <see cref="IMediaTransport.PlaybackPosition"/> is observed to actually advance (or a bounded
+/// window elapses), since Apple Music's SMTC session reports itself Playing again well before its
+/// WASAPI stream has actually resumed producing audio.
 ///
 /// Kept as a decorator around <see cref="IDeviceController"/>, rather than folded into
 /// <see cref="DeviceController"/> itself or into <see cref="TrackSyncCoordinator"/>, specifically
@@ -56,6 +61,15 @@ public sealed class PlaybackPausingDeviceController(
     /// case.</summary>
     private const int RecoveryPollCount = 10;
 
+    /// <summary>How long to wait between playback-position polls — see
+    /// <see cref="WaitForPositionToAdvance"/>.</summary>
+    private static readonly TimeSpan PositionAdvancePollInterval = TimeSpan.FromMilliseconds(150);
+
+    /// <summary>How many position polls to make before giving up and resuming anyway — 10 * 150ms
+    /// = 1.5s total, comfortably past the ~1-2s Apple Music's WASAPI stream took to start producing
+    /// audio again in the diagnosed case.</summary>
+    private const int PositionAdvancePollCount = 10;
+
     public DeviceFormat? GetCurrentFormat() => inner.GetCurrentFormat();
 
     /// <summary>
@@ -85,6 +99,7 @@ public sealed class PlaybackPausingDeviceController(
             }
             finally
             {
+                WaitForPositionToAdvance();
                 ToggleAndWait();
             }
         }
@@ -102,6 +117,40 @@ public sealed class PlaybackPausingDeviceController(
     /// <summary>See the class doc comment for why this goes through <see cref="Task.Run(Func{Task})"/>
     /// instead of awaiting <see cref="IMediaTransport.TogglePlayPauseAsync"/> inline.</summary>
     private void ToggleAndWait() => Task.Run(mediaTransport.TogglePlayPauseAsync).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Blocks (synchronously, for the same threading reason <see cref="ToggleAndWait"/> does — see
+    /// the class doc comment) until <see cref="IMediaTransport.PlaybackPosition"/> is observed to
+    /// advance past its value right after the inner switch, or <see cref="PositionAdvancePollCount"/>
+    /// polls pass with no advance. Apple Music's SMTC session reports itself <see cref="PlaybackState.Playing"/>
+    /// again immediately once the resume command is sent, but its WASAPI stream can take another
+    /// ~1-2s to actually start producing audio — this makes the
+    /// <see cref="SettingsManagement.FormatSwitchBehavior.PauseDuringSwitch"/> branch's resume
+    /// command wait for genuine recovery instead of firing unconditionally right after
+    /// <see cref="IDeviceController.ApplyTargetFormat"/> returns. When no position is available at
+    /// all (no session, or the read fails), there is nothing to wait on, so this returns
+    /// immediately rather than always paying the full bounded window.
+    /// </summary>
+    private void WaitForPositionToAdvance()
+    {
+        var baseline = mediaTransport.PlaybackPosition;
+        if (baseline is null)
+        {
+            return;
+        }
+
+        Task.Run(async () =>
+        {
+            for (var i = 0; i < PositionAdvancePollCount; i++)
+            {
+                await delay.Wait(PositionAdvancePollInterval);
+                if (mediaTransport.PlaybackPosition is { } current && current > baseline)
+                {
+                    return;
+                }
+            }
+        }).GetAwaiter().GetResult();
+    }
 
     /// <summary>
     /// Detached (not awaited by <see cref="ApplyTargetFormat"/>) background poll that watches for
