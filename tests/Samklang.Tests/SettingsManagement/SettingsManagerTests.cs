@@ -287,6 +287,73 @@ public class SettingsManagerTests
     }
 
     [Fact]
+    public void UpdateFormatSwitchBehavior_persists_the_choice_and_raises_PropertyChanged()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        var raisedCount = 0;
+        manager.PropertyChanged += (_, _) => raisedCount++;
+
+        manager.UpdateFormatSwitchBehavior(FormatSwitchBehavior.PauseDuringSwitch);
+
+        Assert.Equal(FormatSwitchBehavior.PauseDuringSwitch, manager.Current.FormatSwitchBehavior);
+        Assert.Equal(manager.Current, store.Stored);
+        Assert.Equal(1, raisedCount);
+    }
+
+    [Fact]
+    public void UpdateStartMinimized_persists_the_toggle_and_raises_PropertyChanged()
+    {
+        var store = new FakeSettingsStore();
+        var manager = new SettingsManager(store);
+        manager.LoadOrSeed(new DeviceFormat(44_100, 24));
+        var raisedCount = 0;
+        manager.PropertyChanged += (_, _) => raisedCount++;
+
+        manager.UpdateStartMinimized(true);
+
+        Assert.True(manager.Current.StartMinimized);
+        Assert.Equal(manager.Current, store.Stored);
+        Assert.Equal(1, raisedCount);
+    }
+
+    /// <summary>
+    /// Back-compat: a settings.json persisted before this property shipped (including files
+    /// persisted with the two booleans it replaced) has no <c>FormatSwitchBehavior</c> JSON
+    /// property — it must deserialize to <see cref="FormatSwitchBehavior.MuteThroughSwitch"/>,
+    /// keeping today's mute-only behavior unchanged for existing users rather than silently
+    /// switching them to pause or no-mitigation.
+    /// </summary>
+    [Fact]
+    public void Settings_json_without_a_format_switch_behavior_property_deserializes_to_mute_through_switch()
+    {
+        var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30), DeviceTargetingMode.FollowDefault, PinnedDeviceId: null);
+        var node = System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(settings))!.AsObject();
+        node.Remove(nameof(Settings.FormatSwitchBehavior));
+
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<Settings>(node.ToJsonString());
+
+        Assert.Equal(FormatSwitchBehavior.MuteThroughSwitch, roundTripped!.FormatSwitchBehavior);
+    }
+
+    /// <summary>
+    /// Back-compat: a settings.json persisted before StartMinimized shipped has no such JSON
+    /// property — it must deserialize to off, so existing users don't silently start hidden.
+    /// </summary>
+    [Fact]
+    public void Settings_json_without_a_start_minimized_property_deserializes_to_off()
+    {
+        var settings = new Settings(new DeviceFormat(88_200, 24), TimeSpan.FromSeconds(30), DeviceTargetingMode.FollowDefault, PinnedDeviceId: null);
+        var node = System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(settings))!.AsObject();
+        node.Remove(nameof(Settings.StartMinimized));
+
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<Settings>(node.ToJsonString());
+
+        Assert.False(roundTripped!.StartMinimized);
+    }
+
+    [Fact]
     public void UpdateFromSettingsView_leaves_the_switch_log_toggle_untouched()
     {
         var store = new FakeSettingsStore();

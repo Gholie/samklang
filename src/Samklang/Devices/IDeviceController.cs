@@ -4,10 +4,13 @@ namespace Samklang.Devices;
 
 /// <summary>
 /// Applies a Format Resolution's Target Format to the effective render device's shared-mode
-/// Device Format. Per this issue's acceptance criteria: switching mutes the device immediately
-/// before and unmutes immediately after, and is skipped entirely when the device is already at
-/// the Target Format's sample rate — a bit-depth-only difference never triggers a switch, since
-/// bit depth is pinned to 24-bit upstream and 24-bit playback of 16-bit content is bit-perfect.
+/// Device Format, skipped entirely when the device is already at the Target Format's sample
+/// rate — a bit-depth-only difference never triggers a switch, since bit depth is pinned to
+/// 24-bit upstream and 24-bit playback of 16-bit content is bit-perfect. <see cref="DeviceController"/>,
+/// the canonical implementation, mutes the device immediately before a real switch and unmutes
+/// immediately after by default, but that mute step is itself opt-out-able (see its
+/// <c>muteDuringSwitch</c> constructor parameter and <see cref="SettingsManagement.FormatSwitchBehavior.KeepFeedingAudioDuringSwitch"/>)
+/// — the interface makes no muting guarantee, only that the format write happens.
 ///
 /// "The effective render device" is either the Windows default (Follow mode) or a specific
 /// pinned device (Pinned mode), as set via <see cref="SetTargeting"/> and resolved fresh on every

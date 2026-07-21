@@ -52,11 +52,42 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Wpf.Ui.Appearance.SystemThemeWatcher.Watch(this);
 
         _trackWatcher = new SmtcTrackWatcher();
-        _deviceController = new DeviceController(new PolicyConfigAudioEndpoint());
 
+        // Constructed before _deviceController below, which closes over it — DeviceController's
+        // muteDuringSwitch and PlaybackPausingDeviceController's pauseDuringSwitchEnabled both
+        // read _settingsManager.Current live via a closure, so it has to exist first.
         _settingsManager = new SettingsManager(new JsonFileSettingsStore());
+
+        // PlaybackPausingDeviceController wraps the raw DeviceController so a switch can
+        // optionally pause/resume Apple Music around it (FormatSwitchBehavior.PauseDuringSwitch) —
+        // masking the brief mute/rebuild hiccup Windows makes on a format switch by not feeding
+        // the device any audio during that window, rather than just muting through it. The raw
+        // DeviceController's own mute-around-switch step is separately gated by
+        // FormatSwitchBehavior.KeepFeedingAudioDuringSwitch. Both read the setting live via a
+        // closure, so changing it in the Settings page takes effect on the very next switch.
+        _deviceController = new PlaybackPausingDeviceController(
+            new DeviceController(
+                new PolicyConfigAudioEndpoint(),
+                muteDuringSwitch: () => _settingsManager.Current.FormatSwitchBehavior != FormatSwitchBehavior.KeepFeedingAudioDuringSwitch),
+            _trackWatcher,
+            () => _trackWatcher.PlaybackState,
+            () => _settingsManager.Current.FormatSwitchBehavior == FormatSwitchBehavior.PauseDuringSwitch,
+            new SystemDelay());
+
         _settingsManager.LoadOrSeed(TryGetCurrentDeviceFormat(_deviceController));
         _deviceController.SetTargeting(_settingsManager.Current.DeviceTargetingMode, _settingsManager.Current.PinnedDeviceId);
+
+        // Settings.StartMinimized: goes straight to minimized (and off the taskbar) instead of
+        // showing at normal size first, so WPF's automatic post-construction Show() (via
+        // App.xaml's StartupUri) never paints a full-size window — a minimized window is never
+        // drawn at its normal bounds, so there's nothing to flash. Window_Loaded then Hide()s it
+        // the rest of the way once startup has actually run, landing in the same tray-only state
+        // Window_Closing puts it in on a normal close.
+        if (_settingsManager.Current.StartMinimized)
+        {
+            ShowInTaskbar = false;
+            WindowState = WindowState.Minimized;
+        }
 
         // Detailed (Info-level) file logging is opt-in via Settings and off by default — sync
         // AppLog's Enabled flag from the loaded value now, before anything else gets a chance to
@@ -179,6 +210,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // own errors, so there's nothing here for the window to wait on or react to; a found
         // update downloads and restarts the app on its own.
         _ = _updateService.CheckAndApplyUpdateAsync();
+
+        // See the StartMinimized block in the constructor: startup (poll timer, StartAsync) has
+        // now actually run, so it's safe to finish landing in the tray-only state — the same one
+        // Window_Closing puts the window in on a normal close.
+        if (_settingsManager.Current.StartMinimized)
+        {
+            Hide();
+        }
     }
 
     /// <summary>
@@ -209,6 +248,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>Restores the window from the tray — used by the tray's own "Open Samklang" item, its double-click, and a second app launch's activation signal (see App.xaml.cs).</summary>
     public void RestoreFromTray()
     {
+        // Undoes the StartMinimized constructor block's ShowInTaskbar = false — without this, a
+        // run that started minimized would come back from the tray visible but permanently
+        // missing its taskbar button, since nothing else ever resets it.
+        ShowInTaskbar = true;
         Show();
         if (WindowState == WindowState.Minimized)
         {

@@ -9,7 +9,9 @@ namespace Samklang.Devices;
 /// mute/switch cycle, since 24-bit playback of 16-bit content is bit-perfect (bit depth is
 /// pinned to 24-bit upstream, see <see cref="TrackSyncCoordinator"/>) — and otherwise mutes,
 /// writes the new format, and unmutes — unmuting even if the write throws, so a failed switch
-/// never leaves the device silently muted.
+/// never leaves the device silently muted. The mute step itself is gated by
+/// <paramref name="muteDuringSwitch"/> (read fresh on every call, defaulting to always-on when
+/// omitted) so a caller can opt out of it — the format write always happens regardless.
 ///
 /// Which device is "effective" is decided fresh on every call by
 /// <see cref="Domain.DeviceTargetResolver"/>, from the targeting choice set via
@@ -20,8 +22,9 @@ namespace Samklang.Devices;
 /// All actual hardware access is delegated to an <see cref="IAudioEndpoint"/>, which lets this
 /// class be unit-tested with a fake endpoint instead of real Windows COM calls.
 /// </summary>
-public sealed class DeviceController(IAudioEndpoint endpoint) : IDeviceController
+public sealed class DeviceController(IAudioEndpoint endpoint, Func<bool>? muteDuringSwitch = null) : IDeviceController
 {
+    private readonly Func<bool> _muteDuringSwitch = muteDuringSwitch ?? (() => true);
     private DeviceTargetingMode _mode = DeviceTargetingMode.FollowDefault;
     private string? _pinnedDeviceId;
 
@@ -67,14 +70,22 @@ public sealed class DeviceController(IAudioEndpoint endpoint) : IDeviceControlle
             return false;
         }
 
-        endpoint.SetMuted(deviceId, true);
+        var shouldMute = _muteDuringSwitch();
+        if (shouldMute)
+        {
+            endpoint.SetMuted(deviceId, true);
+        }
+
         try
         {
             endpoint.SetFormat(deviceId, target);
         }
         finally
         {
-            endpoint.SetMuted(deviceId, false);
+            if (shouldMute)
+            {
+                endpoint.SetMuted(deviceId, false);
+            }
         }
 
         return true;

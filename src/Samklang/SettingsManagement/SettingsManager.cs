@@ -145,6 +145,31 @@ public sealed class SettingsManager(ISettingsStore store) : INotifyPropertyChang
         OnPropertyChanged(nameof(Current));
     }
 
+    /// <summary>
+    /// Updates and persists the format-switch behavior choice (see
+    /// <see cref="Settings.FormatSwitchBehavior"/>). Applies immediately rather than via
+    /// <see cref="UpdateFromSettingsView"/>, like the other toggles, so the next format switch
+    /// after flipping it picks up the new behavior.
+    /// </summary>
+    public void UpdateFormatSwitchBehavior(FormatSwitchBehavior behavior)
+    {
+        Current = Current with { FormatSwitchBehavior = behavior };
+        store.Save(Current);
+        OnPropertyChanged(nameof(Current));
+    }
+
+    /// <summary>
+    /// Updates and persists the "start minimized" toggle (see <see cref="Settings.StartMinimized"/>).
+    /// Applies immediately, like the other toggles, though it only takes effect on the *next*
+    /// launch — there's nothing for the already-running window to do with it right now.
+    /// </summary>
+    public void UpdateStartMinimized(bool enabled)
+    {
+        Current = Current with { StartMinimized = enabled };
+        store.Save(Current);
+        OnPropertyChanged(nameof(Current));
+    }
+
     private void OnPropertyChanged(string propertyName) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }
