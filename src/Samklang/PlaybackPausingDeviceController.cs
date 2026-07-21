@@ -138,9 +138,58 @@ public sealed class PlaybackPausingDeviceController(
         return switched;
     }
 
-    /// <summary>See the class doc comment for why this goes through <see cref="Task.Run(Func{Task})"/>
-    /// instead of awaiting <see cref="IMediaTransport.TogglePlayPauseAsync"/> inline.</summary>
-    private void ToggleAndWait() => Task.Run(mediaTransport.TogglePlayPauseAsync).GetAwaiter().GetResult();
+    /// <summary>
+    /// How long <see cref="ToggleAndWait"/> waits for a play/pause toggle to complete before giving
+    /// up on it. <see cref="IMediaTransport.TogglePlayPauseAsync"/> is a cross-process SMTC call to
+    /// an app already running on the same machine, not a network round trip — it normally lands in
+    /// well under 100ms — so 2 seconds is generous headroom for ordinary OS scheduling noise while
+    /// still keeping the worst case (Apple Music alive but wedged) a brief, bounded hitch rather
+    /// than the indefinite freeze <see cref="ToggleAndWait"/> used to risk on whatever thread called
+    /// <see cref="ApplyTargetFormat"/> — including the WPF dispatcher thread (see the class doc
+    /// comment). Chosen independently of <see cref="RecoveryPollInterval"/>/<see cref="RecoveryPollCount"/>
+    /// above, which bound a detached background poll that is never on the UI thread and so carries
+    /// no equivalent freeze risk.
+    ///
+    /// <para>
+    /// An instance property with a default, rather than a private const, purely as a test seam —
+    /// see <c>PlaybackPausingDeviceControllerTests</c>' hanging-transport coverage, which overrides
+    /// this to a few milliseconds so that coverage doesn't cost the suite real wall-clock time.
+    /// Production code (the composition root in <c>MainWindow</c>) never touches it.
+    /// </para>
+    /// </summary>
+    internal TimeSpan ToggleTimeout { get; set; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// See the class doc comment for why this goes through <see cref="Task.Run(Func{Task})"/>
+    /// instead of awaiting <see cref="IMediaTransport.TogglePlayPauseAsync"/> inline. The wait
+    /// itself is bounded by <see cref="ToggleTimeout"/>: <see cref="Task.Wait(TimeSpan)"/> is a
+    /// plain blocking wait (no <c>await</c>, so nothing here captures the calling thread's
+    /// <see cref="System.Threading.SynchronizationContext"/> the way the deadlock this class avoids
+    /// would need) that simply stops waiting once the timeout elapses, leaving the toggle task
+    /// running loose in the background if it ever does complete. A caller on the WPF dispatcher
+    /// thread (see the class doc comment) degrades to a missed pause or resume instead of a frozen
+    /// window — the failure mode the timeout exists to bound, not something callers need to react
+    /// to, so this returns normally either way rather than throwing.
+    /// </summary>
+    private void ToggleAndWait()
+    {
+        var toggleTask = Task.Run(mediaTransport.TogglePlayPauseAsync);
+        if (!toggleTask.Wait(ToggleTimeout))
+        {
+            AppLog.Warn(
+                $"Play/pause toggle did not complete within {ToggleTimeout.TotalSeconds:0.#}s — " +
+                "Apple Music may be unresponsive. Continuing without it; the toggle may still land " +
+                "later if the app recovers.",
+                category: "MediaTransport");
+            return;
+        }
+
+        // Already finished by the time Wait(TimeSpan) returned true above; this just unwraps a
+        // fault the same way the original inline GetAwaiter().GetResult() did.
+        // SmtcTrackWatcher.TogglePlayPauseAsync catches and logs its own exceptions, so in
+        // practice this should never actually throw.
+        toggleTask.GetAwaiter().GetResult();
+    }
 
     /// <summary>
     /// Detached (not awaited by <see cref="ApplyTargetFormat"/>) background poll that watches for
@@ -228,6 +277,11 @@ public sealed class PlaybackPausingDeviceController(
             return false;
         }
 
-        return inner.GetCurrentFormat()?.SampleRateHz != target.SampleRateHz;
+        // A null current format means no render device resolved (see DeviceController.ApplyTargetFormat),
+        // so the inner switch below is about to early-return false without touching anything — the
+        // same kind of no-op a same-rate match is, just for a different reason. Guarding on it here
+        // keeps that no-op from still bracketing itself in a pointless, audible pause/resume blip.
+        var current = inner.GetCurrentFormat();
+        return current is not null && current.Value.SampleRateHz != target.SampleRateHz;
     }
 }
