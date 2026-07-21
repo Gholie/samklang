@@ -46,3 +46,7 @@ _Avoid_: Default format (ambiguous with Windows' own term)
 **Grace Period**:
 How long playback must be idle (paused, stopped, or Apple Music closed) before the tool reverts to the Resting Format.
 _Avoid_: Timeout, idle delay
+
+## Conventions
+
+**PR titles**: Conventional-commit style — `type: description` or `type(scope): description` (`feat`, `fix`, `chore`, `docs`, ...). Add a scope when the PR is confined to one area (e.g. `feat(playback)`, `fix(settings)`); omit it when the change spans multiple areas.
