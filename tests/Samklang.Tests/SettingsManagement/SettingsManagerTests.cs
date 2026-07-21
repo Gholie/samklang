@@ -319,11 +319,11 @@ public class SettingsManagerTests
     }
 
     /// <summary>
-    /// Back-compat: a settings.json persisted before this property shipped (including files
-    /// persisted with the two booleans it replaced) has no <c>FormatSwitchBehavior</c> JSON
-    /// property — it must deserialize to <see cref="FormatSwitchBehavior.MuteThroughSwitch"/>,
-    /// keeping today's mute-only behavior unchanged for existing users rather than silently
-    /// switching them to pause or no-mitigation.
+    /// Back-compat: a settings.json written before this property shipped has no
+    /// <c>FormatSwitchBehavior</c> JSON property — it must deserialize to
+    /// <see cref="FormatSwitchBehavior.MuteThroughSwitch"/>, keeping today's mute-only behavior
+    /// unchanged for existing users rather than silently switching them to pause or
+    /// no-mitigation.
     /// </summary>
     [Fact]
     public void Settings_json_without_a_format_switch_behavior_property_deserializes_to_mute_through_switch()
