@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.6.1](https://github.com/Gholie/samklang/compare/v1.6.0...v1.6.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **playback:** skip the pause blip when no device resolves and bound the toggle wait ([#79](https://github.com/Gholie/samklang/issues/79)) ([2d3937d](https://github.com/Gholie/samklang/commit/2d3937d10a28cffe8cfd5498159815ba2055cd7a)), closes [#74](https://github.com/Gholie/samklang/issues/74)
+* **playback:** stop the recovery watch from resuming user pauses and racing itself ([#78](https://github.com/Gholie/samklang/issues/78)) ([52873f9](https://github.com/Gholie/samklang/commit/52873f9b94b529b71b449a5b1ab7f9f85f55e306)), closes [#71](https://github.com/Gholie/samklang/issues/71)
+* **settings:** raise PropertyChanged with the property name for format-switch modes ([#75](https://github.com/Gholie/samklang/issues/75)) ([b8bb505](https://github.com/Gholie/samklang/commit/b8bb50577b163108194b92d176f643f03990ecab)), closes [#72](https://github.com/Gholie/samklang/issues/72)
+
 ## [1.6.0](https://github.com/Gholie/samklang/compare/v1.5.1...v1.6.0) (2026-07-21)
 
 
