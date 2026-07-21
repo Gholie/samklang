@@ -8,6 +8,13 @@ namespace Samklang.Timing;
 /// </summary>
 public interface IDelay
 {
-    /// <summary>Completes after roughly <paramref name="duration"/> has elapsed.</summary>
-    Task Wait(TimeSpan duration);
+    /// <summary>
+    /// Completes after roughly <paramref name="duration"/> has elapsed, or throws
+    /// <see cref="OperationCanceledException"/> as soon as <paramref name="cancellationToken"/> is
+    /// canceled — whichever happens first. Callers that poll in a loop (e.g.
+    /// <see cref="PlaybackPausingDeviceController"/>'s recovery watch) rely on the early-cancel
+    /// behavior to stop waiting out a superseded poll instead of sitting through the rest of its
+    /// interval.
+    /// </summary>
+    Task Wait(TimeSpan duration, CancellationToken cancellationToken);
 }

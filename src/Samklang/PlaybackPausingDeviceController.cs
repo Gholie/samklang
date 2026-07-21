@@ -14,7 +14,18 @@ namespace Samklang;
 /// reactive recovery watch after every other real switch (see <see cref="StartRecoveryWatch"/>)
 /// to work around a separate Apple Music bug: its own SMTC session sometimes reports itself
 /// <see cref="PlaybackState.Paused"/> after a shared-mode format switch invalidates its WASAPI
-/// stream, and does not auto-resume on its own, even when nothing asked it to pause.
+/// stream, and does not auto-resume on its own, even when nothing asked it to pause. The watch
+/// only treats an observed <see cref="PlaybackState.Paused"/> as that bug when it shows up within
+/// the first few polls — see <see cref="RecoveryBugWindowPollCount"/> — since a pause noticed
+/// later in the window is far more likely to be the user pausing on purpose (format switches fire
+/// on track change, exactly when a "wrong track, stop" pause is likely), and unconditionally
+/// resuming that would silently undo a real user action. Only one watch is ever allowed to be
+/// in flight: starting a new one cancels whatever the previous one was doing (see
+/// <see cref="_recoveryCts"/>), because two real switches inside the ~1.5s window otherwise leave
+/// two watches polling the same lagging SMTC state, and a superseded watch can observe a stale
+/// <see cref="PlaybackState.Paused"/> left over from before the newer switch's own resume already
+/// fixed things — and toggle again, leaving playback paused, which is exactly the bug this watch
+/// exists to prevent.
 ///
 /// Kept as a decorator around <see cref="IDeviceController"/>, rather than folded into
 /// <see cref="DeviceController"/> itself or into <see cref="TrackSyncCoordinator"/>, specifically
@@ -56,12 +67,40 @@ public sealed class PlaybackPausingDeviceController(
     /// case.</summary>
     private const int RecoveryPollCount = 10;
 
+    /// <summary>
+    /// How many of the leading <see cref="RecoveryPollCount"/> polls still count as "the Apple
+    /// Music bug" if they observe <see cref="PlaybackState.Paused"/>. In the diagnosed case the
+    /// SMTC session flipped to <see cref="PlaybackState.Paused"/> on the very first poll (150ms
+    /// after the switch); this adds one extra poll (300ms total) of slack for ordinary
+    /// poll-to-poll timing jitter without reopening the false-positive this exists to close — a
+    /// pause a user presses is very unlikely to land in the first 300ms after a track-change-driven
+    /// switch, but by the far end of the window (e.g. poll 8, ~1.2s in) it reads as deliberate, not
+    /// the bug. Deliberately a separate bound from <see cref="RecoveryPollCount"/>, which still
+    /// governs how long the watch keeps running (a late, presumed-user pause still ends the watch —
+    /// see <see cref="StartRecoveryWatch"/> — it just does not trigger a resume).
+    /// </summary>
+    private const int RecoveryBugWindowPollCount = 2;
+
+    /// <summary>
+    /// Guards <see cref="_recoveryCts"/> so cancelling the previous recovery watch and installing
+    /// the new one (in <see cref="StartRecoveryWatch"/>) happens as one atomic step — without this,
+    /// two <see cref="ApplyTargetFormat"/> calls racing each other on different threads (the class
+    /// doc comment covers why that's possible) could both read the same "previous" token and each
+    /// think they're the one that superseded it.
+    /// </summary>
+    private readonly object _recoveryGate = new();
+
+    /// <summary>The in-flight recovery watch's cancellation source, if a watch is currently
+    /// running — see <see cref="StartRecoveryWatch"/>.</summary>
+    private CancellationTokenSource? _recoveryCts;
+
     public DeviceFormat? GetCurrentFormat() => inner.GetCurrentFormat();
 
     /// <summary>
     /// Test-only seam: the <see cref="Task"/> started by the most recent recovery watch (or null
     /// if none has started yet), so tests can await its completion instead of racing detached
-    /// background work.
+    /// background work. Resolves even when that watch was cancelled — see
+    /// <see cref="StartRecoveryWatch"/> — so awaiting it never leaves a test hanging or throws.
     /// </summary>
     internal Task? LastRecoveryTask { get; private set; }
 
@@ -106,27 +145,70 @@ public sealed class PlaybackPausingDeviceController(
     /// <summary>
     /// Detached (not awaited by <see cref="ApplyTargetFormat"/>) background poll that watches for
     /// Apple Music unexpectedly reporting <see cref="PlaybackState.Paused"/> shortly after a real
-    /// switch it wasn't asked to pause around, and resumes it once if so. Bounded to
-    /// <see cref="RecoveryPollCount"/> polls so a switch that never triggers the bug doesn't leave
-    /// anything running. Must stay detached: <see cref="ApplyTargetFormat"/> can run on the WPF
-    /// dispatcher thread (see the class doc comment), and blocking it for the ~1.5s this poll
-    /// needs would freeze the window.
+    /// switch it wasn't asked to pause around, and resumes it once if the pause showed up within
+    /// <see cref="RecoveryBugWindowPollCount"/> polls — see that constant's doc comment for why a
+    /// later pause is treated as the user's, not the bug's, and left alone. Bounded to
+    /// <see cref="RecoveryPollCount"/> polls either way, so a switch that never triggers the bug
+    /// doesn't leave anything running. Must stay detached: <see cref="ApplyTargetFormat"/> can run
+    /// on the WPF dispatcher thread (see the class doc comment), and blocking it for the ~1.5s
+    /// this poll needs would freeze the window.
+    ///
+    /// <para>
+    /// Cancels whatever the previous watch was doing before starting this one, under
+    /// <see cref="_recoveryGate"/>, so at most one watch is ever polling — see the class doc
+    /// comment for why a superseded watch left running is dangerous (it can act on stale SMTC
+    /// state and double-toggle into a pause). The cancellation is caught and swallowed rather than
+    /// left to fault the task: a cancelled watch must still complete <see cref="LastRecoveryTask"/>
+    /// successfully so tests can await it, and an unobserved faulted task would otherwise surface
+    /// later as a <see cref="TaskScheduler.UnobservedTaskException"/>.
+    /// </para>
     /// </summary>
     private void StartRecoveryWatch()
     {
+        var cts = new CancellationTokenSource();
+        lock (_recoveryGate)
+        {
+            _recoveryCts?.Cancel();
+            _recoveryCts = cts;
+        }
+
+        var token = cts.Token;
         LastRecoveryTask = Task.Run(async () =>
         {
-            for (var i = 0; i < RecoveryPollCount; i++)
+            try
             {
-                await delay.Wait(RecoveryPollInterval);
-                if (currentPlaybackState() == PlaybackState.Paused)
+                for (var i = 0; i < RecoveryPollCount; i++)
                 {
+                    await delay.Wait(RecoveryPollInterval, token);
+                    if (token.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    if (currentPlaybackState() != PlaybackState.Paused)
+                    {
+                        continue;
+                    }
+
+                    if (i >= RecoveryBugWindowPollCount)
+                    {
+                        AppLog.Info(
+                            "Playback paused after a format switch, past the early recovery window — presuming a user pause, not resuming.",
+                            category: "MediaTransport");
+                        return;
+                    }
+
                     AppLog.Info(
                         "Apple Music unexpectedly paused after a format switch — auto-resuming.",
                         category: "MediaTransport");
                     await mediaTransport.TogglePlayPauseAsync();
                     return;
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                // Superseded by a newer switch's watch — see the doc comment above. Not a real
+                // failure, so it's swallowed here rather than left to fault the task.
             }
         });
     }
