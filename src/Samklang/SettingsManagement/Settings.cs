@@ -34,6 +34,19 @@ namespace Samklang.SettingsManagement;
 /// With it off, clicking a song only opens its album (a plain deep link) and the queue buttons are
 /// hidden. Missing from older settings.json files deserializes to false, keeping the feature opt-in.
 /// </para>
+/// <para>
+/// <paramref name="FormatSwitchBehavior"/> chooses what happens to playback and the device's mute
+/// state around a device format switch — see <see cref="SettingsManagement.FormatSwitchBehavior"/>
+/// for the three options. Defaults to <see cref="SettingsManagement.FormatSwitchBehavior.MuteThroughSwitch"/>,
+/// which is also what settings.json files persisted before this property existed (and files
+/// persisted with the two booleans it replaced) deserialize to, preserving today's mute-by-default
+/// behavior for existing users.
+/// </para>
+/// <para>
+/// <paramref name="StartMinimized"/> skips showing the main window on startup, leaving the app in
+/// the tray from the moment it launches — for users who only ever interact with it via the tray
+/// icon. Off by default; missing from older settings.json files deserializes to false.
+/// </para>
 /// </summary>
 public sealed record Settings(
     DeviceFormat RestingFormat,
@@ -45,7 +58,9 @@ public sealed record Settings(
     bool RichNowPlaying = true,
     bool ShowSwitchLog = false,
     bool EnableDetailedLogging = false,
-    bool ControlAppleMusicApp = false)
+    bool ControlAppleMusicApp = false,
+    FormatSwitchBehavior FormatSwitchBehavior = FormatSwitchBehavior.MuteThroughSwitch,
+    bool StartMinimized = false)
 {
     /// <summary>The Grace Period new Settings are seeded with on first run, per docs/PLAN.md.</summary>
     public static readonly TimeSpan DefaultGracePeriod = TimeSpan.FromSeconds(30);

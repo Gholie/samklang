@@ -38,6 +38,10 @@ public sealed class SettingsViewModel : ViewModelBase
     private bool _showSwitchLogEnabled;
     private bool _enableDetailedLoggingEnabled;
     private bool _controlAppleMusicAppEnabled;
+    private bool _isMuteThroughSwitchMode = true;
+    private bool _isPauseDuringSwitchMode;
+    private bool _isKeepFeedingAudioDuringSwitchMode;
+    private bool _startMinimizedEnabled;
     private string _statusMessage = string.Empty;
 
     public SettingsViewModel(SettingsManager settingsManager, IDeviceController deviceController, IStartupRegistration startupRegistration)
@@ -225,6 +229,73 @@ public sealed class SettingsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Radio-button-style tri-state group backing <see cref="SettingsManagement.Settings.FormatSwitchBehavior"/>
+    /// — see <see cref="IsMuteThroughSwitchMode"/>, <see cref="IsPauseDuringSwitchMode"/>, and
+    /// <see cref="IsKeepFeedingAudioDuringSwitchMode"/>. Only reacts when a member is set to
+    /// <c>true</c>; the sibling(s) WPF's <c>RadioButton</c> grouping flips to <c>false</c> in
+    /// response fire their own setters too, but with no persisted enum value for "off" there is
+    /// nothing for those calls to do.
+    /// </summary>
+    private void SetFormatSwitchBehaviorMode(ref bool field, bool value, FormatSwitchBehavior behavior)
+    {
+        if (!SetField(ref field, value) || _isLoading || !value)
+        {
+            return;
+        }
+
+        _settingsManager.UpdateFormatSwitchBehavior(behavior);
+    }
+
+    /// <summary>
+    /// Mute the device immediately before a switch and unmute immediately after — the default. See
+    /// <see cref="SettingsManagement.FormatSwitchBehavior.MuteThroughSwitch"/>.
+    /// </summary>
+    public bool IsMuteThroughSwitchMode
+    {
+        get => _isMuteThroughSwitchMode;
+        set => SetFormatSwitchBehaviorMode(ref _isMuteThroughSwitchMode, value, FormatSwitchBehavior.MuteThroughSwitch);
+    }
+
+    /// <summary>
+    /// Pause Apple Music (via SMTC) immediately before a device format switch and resume it
+    /// immediately after. See <see cref="SettingsManagement.FormatSwitchBehavior.PauseDuringSwitch"/>.
+    /// </summary>
+    public bool IsPauseDuringSwitchMode
+    {
+        get => _isPauseDuringSwitchMode;
+        set => SetFormatSwitchBehaviorMode(ref _isPauseDuringSwitchMode, value, FormatSwitchBehavior.PauseDuringSwitch);
+    }
+
+    /// <summary>
+    /// Skip both mitigations, leaving the device unmuted and playback running through the switch.
+    /// See <see cref="SettingsManagement.FormatSwitchBehavior.KeepFeedingAudioDuringSwitch"/>.
+    /// </summary>
+    public bool IsKeepFeedingAudioDuringSwitchMode
+    {
+        get => _isKeepFeedingAudioDuringSwitchMode;
+        set => SetFormatSwitchBehaviorMode(ref _isKeepFeedingAudioDuringSwitchMode, value, FormatSwitchBehavior.KeepFeedingAudioDuringSwitch);
+    }
+
+    /// <summary>
+    /// Skips showing the main window on startup, leaving the app in the tray from launch — see
+    /// <see cref="SettingsManagement.Settings.StartMinimized"/>. Off by default; applies immediately
+    /// like <see cref="ControlAppleMusicAppEnabled"/>, though it only takes effect on the next launch.
+    /// </summary>
+    public bool StartMinimizedEnabled
+    {
+        get => _startMinimizedEnabled;
+        set
+        {
+            if (!SetField(ref _startMinimizedEnabled, value) || _isLoading)
+            {
+                return;
+            }
+
+            _settingsManager.UpdateStartMinimized(value);
+        }
+    }
+
     public string StatusMessage
     {
         get => _statusMessage;
@@ -269,6 +340,10 @@ public sealed class SettingsViewModel : ViewModelBase
             ShowSwitchLogEnabled = settings.ShowSwitchLog;
             EnableDetailedLoggingEnabled = settings.EnableDetailedLogging;
             ControlAppleMusicAppEnabled = settings.ControlAppleMusicApp;
+            IsMuteThroughSwitchMode = settings.FormatSwitchBehavior == FormatSwitchBehavior.MuteThroughSwitch;
+            IsPauseDuringSwitchMode = settings.FormatSwitchBehavior == FormatSwitchBehavior.PauseDuringSwitch;
+            IsKeepFeedingAudioDuringSwitchMode = settings.FormatSwitchBehavior == FormatSwitchBehavior.KeepFeedingAudioDuringSwitch;
+            StartMinimizedEnabled = settings.StartMinimized;
 
             StatusMessage = string.Empty;
         }

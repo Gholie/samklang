@@ -288,6 +288,104 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public void Construction_loads_the_format_switch_behavior_mode_from_settings()
+    {
+        var settings = new Settings(
+            new DeviceFormat(44_100, 24),
+            Settings.DefaultGracePeriod,
+            DeviceTargetingMode.FollowDefault,
+            PinnedDeviceId: null,
+            FormatSwitchBehavior: FormatSwitchBehavior.PauseDuringSwitch);
+        var settingsManager = CreateSettingsManager(settings);
+
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+
+        Assert.False(viewModel.IsMuteThroughSwitchMode);
+        Assert.True(viewModel.IsPauseDuringSwitchMode);
+        Assert.False(viewModel.IsKeepFeedingAudioDuringSwitchMode);
+    }
+
+    [Fact]
+    public void Construction_defaults_to_mute_through_switch_mode()
+    {
+        var settingsManager = CreateSettingsManager();
+
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+
+        Assert.True(viewModel.IsMuteThroughSwitchMode);
+        Assert.False(viewModel.IsPauseDuringSwitchMode);
+        Assert.False(viewModel.IsKeepFeedingAudioDuringSwitchMode);
+    }
+
+    [Fact]
+    public void Selecting_pause_during_switch_mode_persists_immediately_without_the_save_command()
+    {
+        var settingsManager = CreateSettingsManager();
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+
+        viewModel.IsPauseDuringSwitchMode = true;
+
+        Assert.Equal(FormatSwitchBehavior.PauseDuringSwitch, settingsManager.Current.FormatSwitchBehavior);
+    }
+
+    [Fact]
+    public void Selecting_keep_feeding_audio_mode_persists_immediately_without_the_save_command()
+    {
+        var settingsManager = CreateSettingsManager();
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+
+        viewModel.IsKeepFeedingAudioDuringSwitchMode = true;
+
+        Assert.Equal(FormatSwitchBehavior.KeepFeedingAudioDuringSwitch, settingsManager.Current.FormatSwitchBehavior);
+    }
+
+    /// <summary>
+    /// WPF's RadioButton grouping flips the previously-selected member's IsChecked to false as
+    /// part of selecting a new one — that false-set must not itself persist anything, or the
+    /// enum would get clobbered back toward whichever binding happens to update last.
+    /// </summary>
+    [Fact]
+    public void Deselecting_a_format_switch_behavior_mode_does_not_persist_anything()
+    {
+        var settingsManager = CreateSettingsManager();
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+        viewModel.IsPauseDuringSwitchMode = true;
+
+        viewModel.IsMuteThroughSwitchMode = false;
+
+        Assert.Equal(FormatSwitchBehavior.PauseDuringSwitch, settingsManager.Current.FormatSwitchBehavior);
+    }
+
+    [Fact]
+    public void Construction_loads_the_start_minimized_toggle_from_settings()
+    {
+        var settings = new Settings(
+            new DeviceFormat(44_100, 24),
+            Settings.DefaultGracePeriod,
+            DeviceTargetingMode.FollowDefault,
+            PinnedDeviceId: null,
+            StartMinimized: true);
+        var settingsManager = CreateSettingsManager(settings);
+
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+
+        Assert.True(viewModel.StartMinimizedEnabled);
+    }
+
+    [Fact]
+    public void Toggling_start_minimized_persists_immediately_without_the_save_command()
+    {
+        var settingsManager = CreateSettingsManager();
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+
+        Assert.False(viewModel.StartMinimizedEnabled);
+
+        viewModel.StartMinimizedEnabled = true;
+
+        Assert.True(settingsManager.Current.StartMinimized);
+    }
+
+    [Fact]
     public void RefreshDevices_repopulates_available_devices_and_preserves_the_current_selection()
     {
         var settingsManager = CreateSettingsManager();

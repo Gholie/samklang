@@ -112,6 +112,36 @@ public class DeviceControllerTests
     }
 
     [Fact]
+    public void ApplyTargetFormat_skips_muting_when_muteDuringSwitch_returns_false()
+    {
+        var endpoint = new FakeAudioEndpoint { Current = new DeviceFormat(48_000, 16) };
+        var controller = new DeviceController(endpoint, muteDuringSwitch: () => false);
+        var target = new DeviceFormat(44_100, 24);
+
+        var switched = controller.ApplyTargetFormat(target);
+
+        Assert.True(switched);
+        Assert.Equal(["get", $"set:{target}"], endpoint.Calls);
+    }
+
+    [Fact]
+    public void ApplyTargetFormat_reads_muteDuringSwitch_fresh_on_every_call()
+    {
+        var endpoint = new FakeAudioEndpoint { Current = new DeviceFormat(48_000, 16) };
+        var shouldMute = false;
+        var controller = new DeviceController(endpoint, muteDuringSwitch: () => shouldMute);
+
+        controller.ApplyTargetFormat(new DeviceFormat(44_100, 24));
+        Assert.DoesNotContain(endpoint.Calls, call => call is "mute" or "unmute");
+
+        endpoint.Calls.Clear();
+        shouldMute = true;
+        controller.ApplyTargetFormat(new DeviceFormat(48_000, 24));
+        Assert.Contains("mute", endpoint.Calls);
+        Assert.Contains("unmute", endpoint.Calls);
+    }
+
+    [Fact]
     public void ApplyTargetFormat_still_unmutes_when_the_switch_throws()
     {
         var endpoint = new ThrowingFakeAudioEndpoint { Current = new DeviceFormat(48_000, 16) };

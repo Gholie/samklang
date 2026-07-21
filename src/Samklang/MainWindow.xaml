@@ -578,6 +578,30 @@
                         </StackPanel>
                     </StackPanel>
 
+                    <TextBlock Text="Format switching" FontWeight="Bold" Margin="0,0,0,8" />
+                    <StackPanel Margin="0,0,0,16">
+                        <!-- A single mutually-exclusive choice (was two independent checkboxes, which let
+                             both be checked at once — pausing playback while also asking not to mute is a
+                             no-op combination, since nothing is being fed to the device once playback is
+                             paused, which was confusing). Applies immediately (no Save needed), like the
+                             other toggles. -->
+                        <RadioButton GroupName="FormatSwitchBehavior" Content="Mute through the switch (default)"
+                                     IsChecked="{Binding IsMuteThroughSwitchMode}" />
+                        <TextBlock Text="Samklang mutes the device right before switching the sample rate and unmutes it right after, so you get a brief silent gap instead of Windows' mute/rebuild hiccup."
+                                   FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   TextWrapping="Wrap" Margin="28,2,0,8" />
+                        <RadioButton GroupName="FormatSwitchBehavior" Content="Pause playback during the switch"
+                                     IsChecked="{Binding IsPauseDuringSwitchMode}" />
+                        <TextBlock Text="Samklang pauses Apple Music right before switching the sample rate and resumes it right after, instead of just muting through the hiccup. A pause/resume cycle is itself a momentary, audible interruption, so this isn't a universal upgrade over the default."
+                                   FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   TextWrapping="Wrap" Margin="28,2,0,8" />
+                        <RadioButton GroupName="FormatSwitchBehavior" Content="Keep feeding audio (skip mute)"
+                                     IsChecked="{Binding IsKeepFeedingAudioDuringSwitchMode}" />
+                        <TextBlock Text="Samklang no longer mutes the device around a format switch, so you'll hear Windows' brief hiccup instead of a silent gap."
+                                   FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   TextWrapping="Wrap" Margin="28,2,0,0" />
+                    </StackPanel>
+
                     <TextBlock Text="Tier mappings — sample rate (Hz) per Audio Tier" FontWeight="Bold" Margin="0,0,0,8" />
                     <StackPanel Margin="0,0,0,16">
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
@@ -642,8 +666,14 @@
                     </StackPanel>
 
                     <TextBlock Text="Startup" FontWeight="Bold" Margin="0,0,0,8" />
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-                        <CheckBox Content="Start with Windows" IsChecked="{Binding StartWithWindows}" VerticalAlignment="Center" />
+                    <StackPanel Margin="0,0,0,16">
+                        <StackPanel Orientation="Horizontal">
+                            <CheckBox Content="Start with Windows" IsChecked="{Binding StartWithWindows}" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <!-- Applies immediately (no Save needed), like the other toggles, though it only
+                             takes effect on the next launch. -->
+                        <CheckBox Content="Start minimized to tray" IsChecked="{Binding StartMinimizedEnabled}"
+                                  Margin="0,8,0,0" />
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal">
