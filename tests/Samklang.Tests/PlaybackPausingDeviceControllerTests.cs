@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading;
 using Samklang.Devices;
 using Samklang.Domain;
@@ -218,6 +219,50 @@ public class PlaybackPausingDeviceControllerTests
         Assert.Empty(transport.Calls);
     }
 
+    /// <summary>
+    /// Regression test for the pointless pause/resume blip when no render device resolves:
+    /// <see cref="IDeviceController.GetCurrentFormat"/> returning null used to compare as
+    /// "different rate" (<c>null != target.SampleRateHz</c>), so the controller paused Apple Music
+    /// around an inner switch that was always going to early-return false without touching
+    /// anything. <see cref="NoDeviceInnerController"/> mirrors that real
+    /// <c>DeviceController.ApplyTargetFormat</c> behavior — null current format, switch is a no-op —
+    /// so this is modeled directly on <see cref="ApplyTargetFormat_does_not_pause_when_the_rate_already_matches"/>.
+    /// </summary>
+    [Fact]
+    public void ApplyTargetFormat_does_not_pause_when_no_device_resolves()
+    {
+        var inner = new NoDeviceInnerController();
+        var transport = new FakeMediaTransport();
+        var controller = new PlaybackPausingDeviceController(
+            inner, transport, () => PlaybackState.Playing, () => true, new FakeDelay());
+
+        var switched = controller.ApplyTargetFormat(new DeviceFormat(44_100, 24));
+
+        Assert.False(switched);
+        Assert.Empty(transport.Calls);
+        Assert.Null(controller.LastRecoveryTask);
+    }
+
+    /// <summary>Mirrors <c>DeviceController.ApplyTargetFormat</c> when no render device can be
+    /// resolved: <see cref="GetCurrentFormat"/> is always null, and the switch itself is always a
+    /// no-op, regardless of target.</summary>
+    private sealed class NoDeviceInnerController : IDeviceController
+    {
+        public DeviceFormat? GetCurrentFormat() => null;
+
+        public bool ApplyTargetFormat(DeviceFormat target) => false;
+
+        public IReadOnlySet<int> GetSupportedSampleRates(int bitDepth) => new HashSet<int>();
+
+        public void SetTargeting(DeviceTargetingMode mode, string? pinnedDeviceId)
+        {
+        }
+
+        public IReadOnlyList<RenderDevice> GetActiveRenderDevices() => [];
+
+        public DeviceTargetStatus GetTargetStatus() => new(null, null, false);
+    }
+
     [Fact]
     public void ApplyTargetFormat_still_resumes_when_the_inner_switch_throws()
     {
@@ -309,6 +354,80 @@ public class PlaybackPausingDeviceControllerTests
         public async Task TogglePlayPauseAsync() => await Task.Delay(1);
 
         public Task SkipNextAsync() => Task.CompletedTask;
+    }
+
+    /// <summary>A transport whose <see cref="TogglePlayPauseAsync"/> records that it was called but
+    /// then never completes, simulating an Apple Music process that is alive but wedged — the case
+    /// <see cref="PlaybackPausingDeviceController.ToggleTimeout"/> exists to bound.</summary>
+    private sealed class HangingMediaTransport : IMediaTransport
+    {
+        private readonly TaskCompletionSource _neverCompletes = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public byte[]? ArtworkBytes => null;
+        public event EventHandler? ArtworkChanged { add { } remove { } }
+        public List<string> Calls { get; } = [];
+
+        public Task SkipPreviousAsync() => Task.CompletedTask;
+
+        public Task TogglePlayPauseAsync()
+        {
+            Calls.Add("toggle");
+            return _neverCompletes.Task;
+        }
+
+        public Task SkipNextAsync() => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Regression test for the unbounded UI-thread block: a transport toggle that never completes
+    /// used to block <see cref="PlaybackPausingDeviceController.ApplyTargetFormat"/>'s caller
+    /// forever — potentially the WPF dispatcher thread (see the class doc comment). Overrides
+    /// <see cref="PlaybackPausingDeviceController.ToggleTimeout"/> down to a few milliseconds so
+    /// this proves the bound exists without costing the suite real wall-clock time waiting out the
+    /// production timeout.
+    /// </summary>
+    [Fact]
+    public void ApplyTargetFormat_gives_up_on_a_hanging_transport_toggle_instead_of_blocking_forever()
+    {
+        var inner = new FakeDeviceController { Current = new DeviceFormat(48_000, 24) };
+        var transport = new HangingMediaTransport();
+        var controller = new PlaybackPausingDeviceController(
+            inner, transport, () => PlaybackState.Playing, () => true, new FakeDelay())
+        {
+            ToggleTimeout = TimeSpan.FromMilliseconds(20),
+        };
+        var stopwatch = Stopwatch.StartNew();
+
+        var switched = controller.ApplyTargetFormat(new DeviceFormat(44_100, 24));
+        stopwatch.Stop();
+
+        Assert.True(switched);
+        // Two timed-out waits (pause, then resume) at 20ms each; a two-second ceiling is generous
+        // enough that it would only be approached if the timeout stopped being honored entirely.
+        Assert.True(
+            stopwatch.Elapsed < TimeSpan.FromSeconds(2),
+            $"Expected the timed-out toggles to give up quickly instead of blocking; took {stopwatch.Elapsed}.");
+    }
+
+    /// <summary>
+    /// Regression test for the try/finally in <see cref="PlaybackPausingDeviceController.ApplyTargetFormat"/>:
+    /// a proactive pause toggle that times out must not leave the resume toggle unsent afterwards.
+    /// Both toggles are attempted here even though neither transport call ever actually completes.
+    /// </summary>
+    [Fact]
+    public void ApplyTargetFormat_still_sends_the_resume_toggle_after_the_pause_toggle_times_out()
+    {
+        var inner = new FakeDeviceController { Current = new DeviceFormat(48_000, 24) };
+        var transport = new HangingMediaTransport();
+        var controller = new PlaybackPausingDeviceController(
+            inner, transport, () => PlaybackState.Playing, () => true, new FakeDelay())
+        {
+            ToggleTimeout = TimeSpan.FromMilliseconds(20),
+        };
+
+        controller.ApplyTargetFormat(new DeviceFormat(44_100, 24));
+
+        Assert.Equal(["toggle", "toggle"], transport.Calls);
     }
 
     /// <summary>
