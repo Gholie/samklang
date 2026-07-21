@@ -50,3 +50,5 @@ _Avoid_: Timeout, idle delay
 ## Conventions
 
 **PR titles**: Conventional-commit style — `type: description` or `type(scope): description` (`feat`, `fix`, `chore`, `docs`, ...). Add a scope when the PR is confined to one area (e.g. `feat(playback)`, `fix(settings)`); omit it when the change spans multiple areas.
+
+**Commit signing**: All commits must be GPG signed before pushing to the remote.
