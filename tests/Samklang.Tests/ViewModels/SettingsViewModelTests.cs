@@ -357,6 +357,48 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public void Setting_IsMuteThroughSwitchMode_raises_PropertyChanged_with_its_own_name()
+    {
+        var settingsManager = CreateSettingsManager();
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+        // Defaults to true (Construction_defaults_to_mute_through_switch_mode), so flip it away
+        // first to make the upcoming set back to true an actual change SetField will notice.
+        viewModel.IsMuteThroughSwitchMode = false;
+        var raisedProperties = new List<string>();
+        viewModel.PropertyChanged += (_, e) => raisedProperties.Add(e.PropertyName!);
+
+        viewModel.IsMuteThroughSwitchMode = true;
+
+        Assert.Contains(nameof(SettingsViewModel.IsMuteThroughSwitchMode), raisedProperties);
+    }
+
+    [Fact]
+    public void Setting_IsPauseDuringSwitchMode_raises_PropertyChanged_with_its_own_name()
+    {
+        var settingsManager = CreateSettingsManager();
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+        var raisedProperties = new List<string>();
+        viewModel.PropertyChanged += (_, e) => raisedProperties.Add(e.PropertyName!);
+
+        viewModel.IsPauseDuringSwitchMode = true;
+
+        Assert.Contains(nameof(SettingsViewModel.IsPauseDuringSwitchMode), raisedProperties);
+    }
+
+    [Fact]
+    public void Setting_IsKeepFeedingAudioDuringSwitchMode_raises_PropertyChanged_with_its_own_name()
+    {
+        var settingsManager = CreateSettingsManager();
+        var viewModel = new SettingsViewModel(settingsManager, new FakeDeviceController(), new FakeStartupRegistration());
+        var raisedProperties = new List<string>();
+        viewModel.PropertyChanged += (_, e) => raisedProperties.Add(e.PropertyName!);
+
+        viewModel.IsKeepFeedingAudioDuringSwitchMode = true;
+
+        Assert.Contains(nameof(SettingsViewModel.IsKeepFeedingAudioDuringSwitchMode), raisedProperties);
+    }
+
+    [Fact]
     public void Construction_loads_the_start_minimized_toggle_from_settings()
     {
         var settings = new Settings(
