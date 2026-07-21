@@ -23,7 +23,7 @@
          release-please-config.json); the release workflow additionally passes the same version
          via `dotnet publish -p:Version=...` so the published assembly always matches the GitHub
          Release it ships in. -->
-    <Version>1.5.1</Version> <!-- x-release-please-version -->
+    <Version>1.6.0</Version> <!-- x-release-please-version -->
   </PropertyGroup>
 
   <!-- Velopack (issue #10) requires a hand-written Main so it can run its startup hooks before

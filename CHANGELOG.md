@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/Gholie/samklang/compare/v1.5.1...v1.6.0) (2026-07-21)
+
+
+### Features
+
+* unify format-switch behavior into one mode, start-minimized toggle, and recover Apple Music from post-switch pauses ([#66](https://github.com/Gholie/samklang/issues/66)) ([d20b381](https://github.com/Gholie/samklang/commit/d20b3818c4bd2965c19c2e812fd5512b4609687a))
+
 ## [1.5.1](https://github.com/Gholie/samklang/compare/v1.5.0...v1.5.1) (2026-07-09)
 
 
