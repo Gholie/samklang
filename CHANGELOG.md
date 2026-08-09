@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.2](https://github.com/Gholie/samklang/compare/v1.6.1...v1.6.2) (2026-08-09)
+
+
+### Performance Improvements
+
+* **devices:** stop reading every endpoint's friendly name on the poll timer ([#80](https://github.com/Gholie/samklang/issues/80)) ([a11ba32](https://github.com/Gholie/samklang/commit/a11ba3244cf07857a7cc40187f7b9349b166df49))
+
 ## [1.6.1](https://github.com/Gholie/samklang/compare/v1.6.0...v1.6.1) (2026-07-21)
 
 
