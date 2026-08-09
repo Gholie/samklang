@@ -39,8 +39,37 @@ public interface IAudioEndpoint
     /// </summary>
     IReadOnlySet<int> GetSupportedSampleRates(string deviceId, int bitDepth);
 
-    /// <summary>Every render device Windows currently reports as active, for the Settings device picker.</summary>
+    /// <summary>
+    /// Every render device Windows currently reports as active, with display names, for the
+    /// Settings device picker.
+    ///
+    /// <para>
+    /// Deliberately <b>not</b> on any polled path: reading a device's friendly name opens a Core
+    /// Audio property store per device, so this scales with how many endpoints the machine has
+    /// (every HDMI output, every virtual device). Callers that only need to decide which device to
+    /// act on want <see cref="GetActiveRenderDeviceIds"/> instead — see its remarks.
+    /// </para>
+    /// </summary>
     IReadOnlyList<RenderDevice> GetActiveRenderDevices();
+
+    /// <summary>
+    /// The IDs of every render device Windows currently reports as active — the only fact
+    /// <see cref="Domain.DeviceTargetResolver"/> needs, since it decides purely by comparing IDs.
+    ///
+    /// <para>
+    /// Split out from <see cref="GetActiveRenderDevices"/> because it skips the per-device
+    /// friendly-name read, which is what makes that one expensive. This is the version the poll
+    /// timer's path uses: it runs every couple of seconds forever, and reading names it would only
+    /// throw away pegged the UI thread at ~27% of a core indefinitely.
+    /// </para>
+    /// </summary>
+    IReadOnlySet<string> GetActiveRenderDeviceIds();
+
+    /// <summary>
+    /// The device's display name, or null if it can't be read — for the single device a caller
+    /// actually surfaces, rather than every device on the machine.
+    /// </summary>
+    string? GetFriendlyName(string deviceId);
 
     /// <summary>The Windows default render device's ID, or null if none is available right now.</summary>
     string? GetDefaultRenderDeviceId();

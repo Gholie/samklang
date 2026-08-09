@@ -42,7 +42,26 @@ public class DeviceControllerTests
             return new HashSet<int>();
         }
 
-        public IReadOnlyList<RenderDevice> GetActiveRenderDevices() => ActiveDevices;
+        // Counted so a test can assert the polled path never takes the expensive route — see
+        // The_polled_path_never_enumerates_friendly_names.
+        public int ActiveRenderDeviceListReads { get; private set; }
+        public int FriendlyNameReads { get; private set; }
+
+        public IReadOnlyList<RenderDevice> GetActiveRenderDevices()
+        {
+            ActiveRenderDeviceListReads++;
+            return ActiveDevices;
+        }
+
+        // Both derived from ActiveDevices so a test only has to set that one property, exactly as
+        // the real endpoint derives both from the same Windows device list.
+        public IReadOnlySet<string> GetActiveRenderDeviceIds() => ActiveDevices.Select(d => d.Id).ToHashSet();
+
+        public string? GetFriendlyName(string deviceId)
+        {
+            FriendlyNameReads++;
+            return ActiveDevices.FirstOrDefault(d => d.Id == deviceId)?.FriendlyName;
+        }
 
         public string? GetDefaultRenderDeviceId() => DefaultDeviceId;
     }
@@ -65,6 +84,10 @@ public class DeviceControllerTests
         public IReadOnlySet<int> GetSupportedSampleRates(string deviceId, int bitDepth) => new HashSet<int>();
 
         public IReadOnlyList<RenderDevice> GetActiveRenderDevices() => [new RenderDevice("device-1", "Fake Default Device")];
+
+        public IReadOnlySet<string> GetActiveRenderDeviceIds() => new HashSet<string> { "device-1" };
+
+        public string? GetFriendlyName(string deviceId) => "Fake Default Device";
 
         public string? GetDefaultRenderDeviceId() => "device-1";
     }
@@ -307,6 +330,29 @@ public class DeviceControllerTests
         Assert.Equal(devices, controller.GetActiveRenderDevices());
     }
 
+    [Fact]
+    public void The_polled_path_never_enumerates_friendly_names()
+    {
+        // Regression guard for the idle-CPU bug: GetCurrentFormat and GetTargetStatus run on a
+        // 2-second UI poll timer (TrackSyncCoordinator.RefreshDeviceFormat), and routing them
+        // through the friendly-name-bearing enumeration opened a Core Audio property store per
+        // endpoint on every tick — ~27% of a core, indefinitely, with the window hidden to tray.
+        // Device targeting only ever compares IDs, so the polled path must use the ID-only
+        // enumeration and read at most the single name it actually displays.
+        var endpoint = new FakeAudioEndpoint
+        {
+            Current = new DeviceFormat(48_000, 24),
+            ActiveDevices = [new RenderDevice("device-1", "Default Device"), new RenderDevice("device-2", "USB DAC")],
+        };
+        var controller = new DeviceController(endpoint);
+
+        controller.GetCurrentFormat();
+        controller.GetTargetStatus();
+
+        Assert.Equal(0, endpoint.ActiveRenderDeviceListReads);
+        Assert.Equal(1, endpoint.FriendlyNameReads);
+    }
+
     private sealed class RecordingAudioEndpoint(IReadOnlySet<int> supportedSampleRates) : IAudioEndpoint
     {
         public int? LastRequestedBitDepth { get; private set; }
@@ -328,6 +374,10 @@ public class DeviceControllerTests
         }
 
         public IReadOnlyList<RenderDevice> GetActiveRenderDevices() => [new RenderDevice("device-1", "Fake Device")];
+
+        public IReadOnlySet<string> GetActiveRenderDeviceIds() => new HashSet<string> { "device-1" };
+
+        public string? GetFriendlyName(string deviceId) => "Fake Device";
 
         public string? GetDefaultRenderDeviceId() => "device-1";
     }
