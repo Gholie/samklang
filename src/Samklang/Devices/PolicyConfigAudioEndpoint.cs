@@ -108,6 +108,46 @@ public sealed class PolicyConfigAudioEndpoint : IAudioEndpoint
         }
     }
 
+    public IReadOnlySet<string> GetActiveRenderDeviceIds()
+    {
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            var collection = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+
+            // IDs only, deliberately: MMDevice.ID is a straight IMMDevice::GetId call, whereas
+            // FriendlyName opens a property store per device. See GetActiveRenderDevices.
+            var ids = new HashSet<string>(collection.Count);
+            foreach (var device in collection)
+            {
+                ids.Add(device.ID);
+                device.Dispose();
+            }
+
+            return ids;
+        }
+        catch
+        {
+            // Same rationale as GetActiveRenderDevices: an empty set is a safe "nothing known".
+            return new HashSet<string>();
+        }
+    }
+
+    public string? GetFriendlyName(string deviceId)
+    {
+        try
+        {
+            using var device = GetDevice(deviceId);
+            return device.FriendlyName;
+        }
+        catch
+        {
+            // The device can vanish between resolution and this read (unplugged mid-poll); a null
+            // name just leaves the UI showing the ID-less status rather than failing the refresh.
+            return null;
+        }
+    }
+
     public string? GetDefaultRenderDeviceId()
     {
         try

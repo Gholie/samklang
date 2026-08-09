@@ -38,11 +38,12 @@ public sealed class DeviceController(IAudioEndpoint endpoint, Func<bool>? muteDu
 
     public DeviceTargetStatus GetTargetStatus()
     {
-        var activeDevices = endpoint.GetActiveRenderDevices();
-        var resolved = ResolveTarget(activeDevices);
-        var friendlyName = resolved.DeviceId is null
-            ? null
-            : activeDevices.FirstOrDefault(d => d.Id == resolved.DeviceId)?.FriendlyName;
+        var resolved = ResolveTarget();
+
+        // One name read, for the one device this status is about — not a name for every endpoint
+        // on the machine. This runs on the UI poll timer's path (see
+        // TrackSyncCoordinator.RefreshDeviceFormat), so the difference is the whole ballgame.
+        var friendlyName = resolved.DeviceId is null ? null : endpoint.GetFriendlyName(resolved.DeviceId);
 
         return new DeviceTargetStatus(resolved.DeviceId, friendlyName, resolved.IsFallback);
     }
@@ -97,12 +98,14 @@ public sealed class DeviceController(IAudioEndpoint endpoint, Func<bool>? muteDu
         return deviceId is null ? new HashSet<int>() : endpoint.GetSupportedSampleRates(deviceId, bitDepth);
     }
 
-    private ResolvedDeviceTarget ResolveTarget() => ResolveTarget(endpoint.GetActiveRenderDevices());
-
-    private ResolvedDeviceTarget ResolveTarget(IReadOnlyList<RenderDevice> activeDevices)
+    /// <summary>
+    /// Resolves the effective device from IDs alone — <see cref="DeviceTargetResolver"/> decides
+    /// purely by comparing IDs, so this deliberately uses the endpoint's ID-only enumeration
+    /// rather than the friendly-name-bearing <see cref="GetActiveRenderDevices"/>.
+    /// </summary>
+    private ResolvedDeviceTarget ResolveTarget()
     {
         var defaultDeviceId = endpoint.GetDefaultRenderDeviceId();
-        var activeDeviceIds = activeDevices.Select(d => d.Id).ToHashSet();
-        return DeviceTargetResolver.Resolve(_mode, _pinnedDeviceId, defaultDeviceId, activeDeviceIds);
+        return DeviceTargetResolver.Resolve(_mode, _pinnedDeviceId, defaultDeviceId, endpoint.GetActiveRenderDeviceIds());
     }
 }
