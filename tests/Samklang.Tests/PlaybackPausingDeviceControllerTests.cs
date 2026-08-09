@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Threading;
 using Samklang.Devices;
@@ -362,20 +363,57 @@ public class PlaybackPausingDeviceControllerTests
     private sealed class HangingMediaTransport : IMediaTransport
     {
         private readonly TaskCompletionSource _neverCompletes = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly ConcurrentQueue<string> _calls = new();
+        private readonly SemaphoreSlim _callRecorded = new(0);
 
         public byte[]? ArtworkBytes => null;
         public event EventHandler? ArtworkChanged { add { } remove { } }
-        public List<string> Calls { get; } = [];
+
+        /// <summary>Only meaningful once <see cref="WaitForCalls"/> has confirmed the expected
+        /// number of toggles landed — see that method for why reading this straight after
+        /// <see cref="PlaybackPausingDeviceController.ApplyTargetFormat"/> returns races.</summary>
+        public IReadOnlyList<string> Calls => _calls.ToArray();
 
         public Task SkipPreviousAsync() => Task.CompletedTask;
 
         public Task TogglePlayPauseAsync()
         {
-            Calls.Add("toggle");
+            _calls.Enqueue("toggle");
+            _callRecorded.Release();
             return _neverCompletes.Task;
         }
 
         public Task SkipNextAsync() => Task.CompletedTask;
+
+        /// <summary>
+        /// Blocks until <paramref name="expected"/> toggles have been recorded, returning false if
+        /// they don't arrive within a generous ceiling.
+        ///
+        /// <para>
+        /// <c>ToggleAndWait</c> dispatches every toggle through <see cref="Task.Run(Func{Task})"/>
+        /// and then abandons it once <see cref="PlaybackPausingDeviceController.ToggleTimeout"/>
+        /// elapses (the whole point of the bound), so with the few-millisecond timeout these tests
+        /// use, <see cref="PlaybackPausingDeviceController.ApplyTargetFormat"/> can return before
+        /// the thread pool has even dispatched the queued delegate that records the call. Sampling
+        /// <see cref="Calls"/> at that moment is a race: it passes on an idle dev machine and fails
+        /// on a loaded CI runner whose pool threads are busy. Waiting for the recording — rather
+        /// than assuming it already happened — is what makes the assertion deterministic, while the
+        /// ceiling keeps a genuine regression (a toggle that never gets sent at all) a failure
+        /// instead of a hang.
+        /// </para>
+        /// </summary>
+        public bool WaitForCalls(int expected)
+        {
+            for (var i = 0; i < expected; i++)
+            {
+                if (!_callRecorded.Wait(TimeSpan.FromSeconds(5)))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
     }
 
     /// <summary>
@@ -427,6 +465,9 @@ public class PlaybackPausingDeviceControllerTests
 
         controller.ApplyTargetFormat(new DeviceFormat(44_100, 24));
 
+        Assert.True(
+            transport.WaitForCalls(2),
+            $"Expected both the pause and the resume toggle to be sent; saw {transport.Calls.Count}.");
         Assert.Equal(["toggle", "toggle"], transport.Calls);
     }
 
